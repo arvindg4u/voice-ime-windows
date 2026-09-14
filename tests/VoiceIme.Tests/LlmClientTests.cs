@@ -16,13 +16,17 @@ public sealed class LlmClientTests
     private static string OkPayload(string text) =>
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"" + text + "\"}]}}]}";
 
-    private static MockHttpMessageHandler HandlerForKey(string key, HttpStatusCode code, string body)
+    private const string Endpoint = $"{BaseUrl}/models/{Model}:generateContent";
+
+    private static MockHttpMessageHandler KeyedHandler(params (string Key, HttpStatusCode Code, string Body)[] routes)
     {
         var mock = new MockHttpMessageHandler();
-        mock.When(req =>
-                req.RequestUri!.ToString() == $"{BaseUrl}/models/{Model}:generateContent" &&
-                req.Headers.GetValues("x-goog-api-key").First() == key)
-            .Respond(code, "application/json", body);
+        foreach (var (key, code, body) in routes)
+        {
+            mock.When(HttpMethod.Post, Endpoint)
+                .WithHeaders("x-goog-api-key", key)
+                .Respond(code, "application/json", body);
+        }
         return mock;
     }
 
@@ -30,12 +34,9 @@ public sealed class LlmClientTests
     public async Task TranscribeAsync_Success_ReturnsTranscriptAndUsedIndex()
     {
         // Both keys route to OK; startIndex 1 must be used as-is.
-        var mock = new MockHttpMessageHandler();
-        mock.When(req => req.Headers.GetValues("x-goog-api-key").First() == "k1")
-            .Respond(HttpStatusCode.OK, "application/json", OkPayload("from-k1"));
-        mock.When(req => req.Headers.GetValues("x-goog-api-key").First() == "k2")
-            .Respond(HttpStatusCode.OK, "application/json", OkPayload("from-k2"));
-        using var llm = new LlmClient(mock.ToHttpClient());
+        using var llm = new LlmClient(KeyedHandler(
+            ("k1", HttpStatusCode.OK, OkPayload("from-k1")),
+            ("k2", HttpStatusCode.OK, OkPayload("from-k2"))).ToHttpClient());
 
         var (transcript, used) = await llm.TranscribeAsync(
             new byte[100], ["k1", "k2"], BaseUrl, Model, startIndex: 1);
@@ -47,12 +48,9 @@ public sealed class LlmClientTests
     [Fact]
     public async Task TranscribeAsync_429_RotatesToNextKey()
     {
-        var mock = new MockHttpMessageHandler();
-        mock.When(req => req.Headers.GetValues("x-goog-api-key").First() == "k1")
-            .Respond(HttpStatusCode.TooManyRequests, "application/json", "{}");
-        mock.When(req => req.Headers.GetValues("x-goog-api-key").First() == "k2")
-            .Respond(HttpStatusCode.OK, "application/json", OkPayload("rotated"));
-        using var llm = new LlmClient(mock.ToHttpClient());
+        using var llm = new LlmClient(KeyedHandler(
+            ("k1", HttpStatusCode.TooManyRequests, "{}"),
+            ("k2", HttpStatusCode.OK, OkPayload("rotated"))).ToHttpClient());
 
         var (transcript, used) = await llm.TranscribeAsync(
             new byte[100], ["k1", "k2"], BaseUrl, Model);
@@ -65,8 +63,7 @@ public sealed class LlmClientTests
     public async Task TranscribeAsync_All429_ThrowsRateLimited()
     {
         var mock = new MockHttpMessageHandler();
-        mock.When(_ => true)
-            .Respond(HttpStatusCode.TooManyRequests, "application/json", "{}");
+        mock.Fallback.Respond(HttpStatusCode.TooManyRequests, "application/json", "{}");
         using var llm = new LlmClient(mock.ToHttpClient());
 
         var ex = await Assert.ThrowsAsync<TranscribeException>(() =>
@@ -79,8 +76,7 @@ public sealed class LlmClientTests
     public async Task TranscribeAsync_401_FailsImmediately()
     {
         var mock = new MockHttpMessageHandler();
-        mock.When(_ => true)
-            .Respond(HttpStatusCode.Unauthorized, "application/json", "{}");
+        mock.Fallback.Respond(HttpStatusCode.Unauthorized, "application/json", "{}");
         using var llm = new LlmClient(mock.ToHttpClient());
 
         var ex = await Assert.ThrowsAsync<TranscribeException>(() =>
