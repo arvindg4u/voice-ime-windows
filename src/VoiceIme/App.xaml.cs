@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
+using VoiceIme.Theme;
 
 namespace VoiceIme;
 
@@ -27,6 +28,7 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
         _settings = SettingsStore.Load();
         _recorder.AutoStopped += () => _ = StopAndTranscribeAsync();
 
