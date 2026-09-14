@@ -61,12 +61,12 @@ public static class NativeInput
     /// </summary>
     public static void PasteIntoFocusedWindow(string text)
     {
-        IDataObject? previous = null;
-        try { previous = Clipboard.GetDataObject(); } catch { /* clipboard busy */ }
+        System.Windows.Forms.IDataObject? previous = null;
+        try { previous = System.Windows.Forms.Clipboard.GetDataObject(); } catch { /* clipboard busy */ }
 
         try
         {
-            Clipboard.SetText(text);
+            System.Windows.Forms.Clipboard.SetText(text);
         }
         catch (Exception ex)
         {
@@ -81,7 +81,7 @@ public static class NativeInput
         if (previous is not null)
         {
             Thread.Sleep(150);
-            try { Clipboard.SetDataObject(previous, copy: true); } catch { /* ignore */ }
+            try { System.Windows.Forms.Clipboard.SetDataObject(previous, copy: true); } catch { /* ignore */ }
         }
     }
 

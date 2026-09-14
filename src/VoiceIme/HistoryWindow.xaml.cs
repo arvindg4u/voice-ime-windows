@@ -40,7 +40,7 @@ public partial class HistoryWindow : Window
         var id = SelectedId();
         if (id is null) return;
         var entry = _store.Entries.FirstOrDefault(x => x.Id == id);
-        if (entry is not null) Clipboard.SetText(entry.Text);
+        if (entry is not null) System.Windows.Clipboard.SetText(entry.Text);
     }
 
     private void PinButton_Click(object sender, RoutedEventArgs e)
