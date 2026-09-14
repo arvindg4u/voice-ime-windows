@@ -92,6 +92,13 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     }
 
     /// <summary>
+    /// Pure helper: card opacity by row state — failed/empty rows render
+    /// muted, matching Handy's reduced-emphasis failed rows. Unit-testable
+    /// on any OS — no WPF types involved.
+    /// </summary>
+    internal static double CardOpacityForRow(bool failed) => failed ? 0.6 : 1.0;
+
+    /// <summary>
     /// Pure helper: compact display label — pin prefix, HH:mm stamp, and text
     /// truncated to <see cref="PreviewLength"/> chars. Unit-testable on any
     /// OS — no WPF types involved.
@@ -237,6 +244,7 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         return new HistoryRow(
             entry.Id,
             time.ToString("HH:mm"),
+            CardOpacityForRow(failed),
             failed ? string.Empty : entry.Text,
             failed ? Visibility.Collapsed : Visibility.Visible,
             failed ? body : string.Empty,
@@ -281,6 +289,7 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     internal sealed record HistoryRow(
         Guid Id,
         string TimeLabel,
+        double CardOpacity,
         string Body,
         Visibility BodyVisibility,
         string Error,

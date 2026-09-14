@@ -62,6 +62,18 @@ public sealed class HistorySettingsViewTests : IDisposable
     }
 
     [Fact]
+    public void CardOpacityForRow_Failed_IsMuted()
+    {
+        Assert.Equal(0.6, HistorySettingsView.CardOpacityForRow(true));
+    }
+
+    [Fact]
+    public void CardOpacityForRow_Succeeded_IsFull()
+    {
+        Assert.Equal(1.0, HistorySettingsView.CardOpacityForRow(false));
+    }
+
+    [Fact]
     public void Rows_EmptyStore_ShowsEmptyMessage()
     {
         TryRunOnSta(PathFor("empty.json"), _ => { }, view =>
@@ -176,6 +188,46 @@ public sealed class HistorySettingsViewTests : IDisposable
             Assert.Equal("⧉", row.CopyGlyph);
             Assert.Equal("☆", row.PinGlyph);
         });
+    }
+
+    [Fact]
+    public void Rows_SucceededRow_HasFullOpacity()
+    {
+        TryRunOnSta(PathFor("opacity-ok.json"), store => store.Add("heard clearly"), view =>
+        {
+            var row = Assert.Single(view.Rows);
+
+            Assert.Equal(1.0, row.CardOpacity);
+            Assert.Equal(string.Empty, row.Error);
+        });
+    }
+
+    [Fact]
+    public void Rows_FailedRow_HasMutedOpacityAndInlineError()
+    {
+        TryRunOnSta(PathFor("opacity-failed.json"), store => store.Add(string.Empty), view =>
+        {
+            view.AttachError(view.Rows[0].Id, "quota exhausted");
+
+            var row = Assert.Single(view.Rows);
+            Assert.Equal(0.6, row.CardOpacity);
+            Assert.Equal("quota exhausted", row.Error);
+            Assert.Equal(string.Empty, row.Body);
+        });
+    }
+
+    [Fact]
+    public void CopyEntry_ClipboardThrows_ShowsCopyFailureHint()
+    {
+        TryRunOnSta(PathFor("copy-fail.json"), store => store.Add("say this"),
+            view =>
+            {
+                view.CopyEntry(view.Rows[0].Id);
+
+                Assert.StartsWith("Copy failed:", view.HintMessage, StringComparison.Ordinal);
+                Assert.Equal("⧉", view.Rows[0].CopyGlyph);
+            },
+            onCopy: _ => throw new InvalidOperationException("clipboard busy"));
     }
 
     [Fact]

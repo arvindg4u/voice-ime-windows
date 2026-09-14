@@ -24,7 +24,10 @@
 
         <ListBox x:Name="EntriesList"
                  Background="Transparent" BorderThickness="0"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.CanContentScroll="True"
+                 VirtualizingStackPanel.IsVirtualizing="True"
+                 VirtualizingStackPanel.VirtualizationMode="Recycling">
             <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -35,7 +38,9 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <Border Style="{DynamicResource HandySettingCard}" ToolTip="{Binding CompactLabel}">
+                    <Border Style="{DynamicResource HandySettingCard}"
+                            Opacity="{Binding CardOpacity}"
+                            ToolTip="{Binding CompactLabel}">
                         <StackPanel>
                             <TextBlock Text="{Binding TimeLabel}" FontSize="14"
                                        FontWeight="Medium"
