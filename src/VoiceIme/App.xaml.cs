@@ -52,7 +52,7 @@ public partial class App : System.Windows.Application
         menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
         menu.Items.Add("History…", null, (_, _) => OpenHistory());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Quit", null, (_, _) => Shutdown());
+        menu.Items.Add("Quit", null, (_, _) => Quit());
         return menu;
     }
 
@@ -121,18 +121,43 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void OpenSettings()
+    // MainWindow singleton: Task 4 deletes SettingsWindow and Task 5 deletes
+    // HistoryWindow; the legacy files stay in the build (compiling but
+    // unreferenced) until then. Tasks 4/5 wire the matching sections here.
+    private MainWindow? _mainWindow;
+
+    internal void OpenSettings()
     {
-        foreach (System.Windows.Window w in Windows)
-            if (w is SettingsWindow) { w.Activate(); return; }
-        new SettingsWindow().Show();
+        _mainWindow ??= new MainWindow();
+        _mainWindow.NavigateTo(MainSection.General);
+        ShowMainWindow();
     }
 
-    private void OpenHistory()
+    internal void OpenHistory()
     {
-        foreach (System.Windows.Window w in Windows)
-            if (w is HistoryWindow) { w.Activate(); return; }
-        new HistoryWindow(_clips).Show();
+        _mainWindow ??= new MainWindow();
+        _mainWindow.NavigateTo(MainSection.History);
+        ShowMainWindow();
+    }
+
+    internal void ShowMainWindow()
+    {
+        if (_mainWindow is null)
+        {
+            return;
+        }
+
+        if (!_mainWindow.IsVisible)
+        {
+            _mainWindow.Show();
+        }
+
+        if (_mainWindow.WindowState == WindowState.Minimized)
+        {
+            _mainWindow.WindowState = WindowState.Normal;
+        }
+
+        _mainWindow.Activate();
     }
 
     private void SetTray(string text, bool balloon)
@@ -140,6 +165,17 @@ public partial class App : System.Windows.Application
         if (_tray is null) return;
         _tray.Text = text.Length > 63 ? text[..63] : text;
         if (balloon) _tray.ShowBalloonTip(3000, "Voice IME", text, ToolTipIcon.Info);
+        _mainWindow?.SetStatus(text);
+    }
+
+    /// <summary>
+    /// Quit happens only here: a hidden MainWindow cancels Close, so permit
+    /// it explicitly before shutting down.
+    /// </summary>
+    private void Quit()
+    {
+        _mainWindow?.PermitClose();
+        Shutdown();
     }
 
     protected override void OnExit(ExitEventArgs e)
