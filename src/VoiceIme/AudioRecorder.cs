@@ -1,9 +1,14 @@
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using NAudio.Wave;
 
 namespace VoiceIme;
 
 /// <summary>
-/// Captures 16 kHz mono 16-bit PCM via WASAPI and encodes to WAV.
+/// Captures 16 kHz mono 16-bit PCM via WaveIn (format requested from the OS
+/// mixer, so the WAV header always matches the bytes) and encodes to WAV.
 /// Mirrors Android AudioRecorder: stop button + 5 min auto-stop, no VAD library.
 /// Raises <see cref="LevelChanged"/> with a perceptual 0..1 level for the waveform.
 /// </summary>
@@ -14,8 +19,7 @@ public sealed class AudioRecorder : IDisposable
     public const long MaxDurationMs = 300_000L;
     public const float SilencePeakThreshold = 0.008f;
 
-    private readonly WaveFormat _format = new(SampleRate, 16, Channels);
-    private WasapiCapture? _capture;
+    private WaveInEvent? _capture;
     private MemoryStream? _pcm;
     private DateTime _startUtc;
     private bool _disposed;
@@ -77,7 +81,11 @@ public sealed class AudioRecorder : IDisposable
         if (_capture is not null) return;
         _pcm = new MemoryStream();
         _startUtc = DateTime.UtcNow;
-        _capture = new WasapiCapture();
+        _capture = new WaveInEvent
+        {
+            WaveFormat = new WaveFormat(SampleRate, 16, Channels),
+            BufferMilliseconds = 100,
+        };
         _capture.DataAvailable += (_, e) =>
         {
             _pcm.Write(e.Buffer, 0, e.BytesRecorded);

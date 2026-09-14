@@ -52,7 +52,7 @@ for Windows keeps the Android core (record 16 kHz WAV → Gemini
 | Android | Windows |
 | ------- | ------- |
 | `InputMethodService` mic tap | Global hotkey **Ctrl+Shift+Space** from any app |
-| `AudioRecord` | NAudio WASAPI capture |
+| `AudioRecord` | NAudio capture (16 kHz requested from the OS mixer) |
 | `commitText` into editor | Clipboard + synthesized **Ctrl+V** into focused window |
 | `EncryptedSharedPreferences` | DPAPI (`ProtectedData`, CurrentUser scope) |
 | Material 3 IME view | Tray icon + WPF settings/history windows |

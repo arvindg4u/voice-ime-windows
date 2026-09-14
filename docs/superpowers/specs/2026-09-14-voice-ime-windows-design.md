@@ -27,7 +27,7 @@ architecture in a different language, changing only the platform edges.
 Same pipeline and state machine as Android; only edges change:
 
 ```text
-Hotkey (RegisterHotKey) → AudioRecorder (NAudio WASAPI, 16kHz mono → WAV)
+Hotkey (RegisterHotKey) → AudioRecorder (NAudio WaveIn, 16kHz mono → WAV)
 → LlmClient (HttpClient, Gemini generateContent, round-robin keys, 429 failover)
 → ClipboardStore (history) → NativeInput (clipboard + Ctrl+V via SendInput)
 ```
