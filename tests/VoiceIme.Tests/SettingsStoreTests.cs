@@ -5,6 +5,7 @@ using Xunit;
 namespace VoiceIme.Tests;
 
 /// <summary>DPAPI round-trip — Windows only; skipped elsewhere (CI is windows-latest).</summary>
+[Collection("SettingsFile")]
 public sealed class SettingsStoreTests
 {
     [Fact]
@@ -60,6 +61,17 @@ public sealed class SettingsStoreTests
             };
             store.Save();
 
+            // Self-diagnosing: parse the raw file BEFORE Load so a future
+            // failure shows whether Save coerced the value or Load read a
+            // different file. Parsed (not substring) because System.Text.Json
+            // escapes "+" as + on the wire — the value is correct when
+            // the parsed "hotkey" property equals, regardless of escaping.
+            var rawAfterSave = File.ReadAllText(path);
+            Assert.Equal(
+                "Alt+F4",
+                System.Text.Json.JsonDocument.Parse(rawAfterSave)
+                    .RootElement.GetProperty("hotkey").GetString());
+
             // Act
             var reloaded = SettingsStore.Load();
 
@@ -70,7 +82,10 @@ public sealed class SettingsStoreTests
             Assert.True(reloaded.MuteWhileRecording);
 
             var raw = File.ReadAllText(path);
-            Assert.Contains("Alt+F4", raw);
+            Assert.Equal(
+                "Alt+F4",
+                System.Text.Json.JsonDocument.Parse(raw)
+                    .RootElement.GetProperty("hotkey").GetString());
         }
         finally
         {

@@ -1,8 +1,5 @@
 using System;
 using System.IO;
-using System.Runtime.ExceptionServices;
-using System.Threading;
-using System.Windows.Threading;
 using VoiceIme.Views;
 using Xunit;
 
@@ -19,6 +16,7 @@ namespace VoiceIme.Tests;
 /// the test passes vacuously (same pattern as <c>MainWindowTests</c>). Full
 /// coverage runs on windows-latest CI.
 /// </summary>
+[Collection("WpfSta")]
 public sealed class AppWiringTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
@@ -180,49 +178,6 @@ public sealed class AppWiringTests : IDisposable
 
     private static void TryRunOnSta(Action body)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                body();
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-    }
-
-    private static bool IsHeadlessFailure(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            var name = current.GetType().Name;
-            if (name.Contains("InvalidOperationException", StringComparison.Ordinal)
-                || name.Contains("COMException", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        StaTestHelper.TryRunOnSta(body);
     }
 }

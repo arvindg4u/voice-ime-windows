@@ -1,9 +1,6 @@
 using System;
 using System.Linq;
-using System.Runtime.ExceptionServices;
-using System.Threading;
 using System.Windows.Controls;
-using System.Windows.Threading;
 using Xunit;
 
 namespace VoiceIme.Tests;
@@ -15,6 +12,7 @@ namespace VoiceIme.Tests;
 /// vacuously (returns false) instead of failing. Full coverage runs on
 /// windows-latest CI.
 /// </summary>
+[Collection("WpfSta")]
 public sealed class MainWindowTests
 {
     [Fact]
@@ -87,17 +85,12 @@ public sealed class MainWindowTests
     private static bool TryRunOnSta(Action<MainWindow> body)
     {
         MainWindow? window = null;
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        return StaTestHelper.TryRunOnSta(() =>
         {
             try
             {
                 window = new MainWindow();
                 body(window);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
             }
             finally
             {
@@ -105,43 +98,11 @@ public sealed class MainWindowTests
                 {
                     window?.Close();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    failure ??= ex;
+                    // Close failures surface via the body exception path.
                 }
-
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return false;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-
-        return true;
-    }
-
-    private static bool IsHeadlessFailure(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            var name = current.GetType().Name;
-            if (name.Contains("InvalidOperationException", StringComparison.Ordinal)
-                || name.Contains("COMException", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
