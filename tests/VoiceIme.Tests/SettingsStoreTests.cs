@@ -142,4 +142,164 @@ public sealed class SettingsStoreTests
             ActivationModes.PushToTalk,
             SettingsStore.CoerceActivationMode(ActivationModes.PushToTalk));
     }
+
+    [Fact]
+    public void Load_FrozenV0Fixture_GainsSchemaVersionAndNewDefaults()
+    {
+        // Task 9 owns this: frozen v0 bytes (only baseUrl/model/keys circa
+        // Task 1) must load with schemaVersion 1 plus every Task 3 field at
+        // its default, without warnings — v0→v1 is a clean migration.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0}""");
+
+            // Act
+            var loaded = SettingsStore.Load();
+
+            // Assert
+            Assert.Equal(SettingsStore.CurrentSchemaVersion, loaded.SchemaVersion);
+            Assert.Equal("https://example.invalid", loaded.BaseUrl);
+            Assert.Equal("m", loaded.Model);
+            Assert.Equal(HotkeyChord.DefaultChord, loaded.Hotkey);
+            Assert.Equal(ActivationModes.Toggle, loaded.ActivationMode);
+            Assert.Equal("", loaded.Microphone);
+            Assert.False(loaded.MuteWhileRecording);
+            Assert.False(loaded.HasLoadWarnings);
+            Assert.Empty(loaded.LoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CorruptJson_SalvagesSurvivingFieldsOverDefaults()
+    {
+        // Arrange: truncated file — whole-parse fails, but the hotkey and
+        // model pairs are intact in the raw text. Uses the path seam; the
+        // real %AppData% file is never touched.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var corrupt = """{"baseUrl":"https://example.invalid","model":"salvaged-model","hotkey":"Alt+F4","customPrompt":""";
+            File.WriteAllText(path, corrupt);
+
+            // Act
+            var loaded = SettingsStore.Load();
+
+            // Assert
+            Assert.Equal("salvaged-model", loaded.Model);
+            Assert.Equal("Alt+F4", loaded.Hotkey);
+            Assert.Equal(ActivationModes.Toggle, loaded.ActivationMode);
+            Assert.Equal(SettingsStore.CurrentSchemaVersion, loaded.SchemaVersion);
+            Assert.True(loaded.HasLoadWarnings);
+
+            // Never wipes: the corrupt bytes stay for manual recovery.
+            Assert.Equal(corrupt, File.ReadAllText(path));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_BadEnumString_CoercesToDefaultWithWarning()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"hotkey":"nonsense-chord","activationMode":"hold"}""");
+
+            // Act
+            var loaded = SettingsStore.Load();
+
+            // Assert
+            Assert.Equal(HotkeyChord.DefaultChord, loaded.Hotkey);
+            Assert.Equal(ActivationModes.Toggle, loaded.ActivationMode);
+            Assert.Equal(SettingsStore.CurrentSchemaVersion, loaded.SchemaVersion);
+            Assert.True(loaded.HasLoadWarnings);
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("hotkey"));
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("activationMode"));
+
+            // Never wipes: the original file is untouched.
+            Assert.Contains("nonsense-chord", File.ReadAllText(path));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_LegacyLooseShapes_AcceptedWithoutWarnings()
+    {
+        // Legacy writers stored numbers/bools as strings or bare numbers —
+        // the custom converter still honours them, with no warnings.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"schemaVersion":"1","baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":"3","activationMode":"push_to_talk","microphone":"Mic","muteWhileRecording":1}""");
+
+            // Act
+            var loaded = SettingsStore.Load();
+
+            // Assert
+            Assert.Equal(3, loaded.KeyCursor);
+            Assert.Equal(ActivationModes.PushToTalk, loaded.ActivationMode);
+            Assert.True(loaded.MuteWhileRecording);
+            Assert.False(loaded.HasLoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_MissingFile_ReturnsDefaultsWithoutWarnings()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            // Act (file does not exist)
+            var loaded = SettingsStore.Load();
+
+            // Assert
+            Assert.Equal(SettingsStore.CurrentSchemaVersion, loaded.SchemaVersion);
+            Assert.False(loaded.HasLoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+        }
+    }
+
+    [Fact]
+    public void Migrate_IsIdempotent()
+    {
+        var store = new SettingsStore { Hotkey = "bogus", ActivationMode = "bogus" };
+        store.Migrate();
+        var warningsAfterFirst = store.LoadWarnings.Count;
+        store.Migrate();
+
+        Assert.Equal(SettingsStore.CurrentSchemaVersion, store.SchemaVersion);
+        Assert.Equal(HotkeyChord.DefaultChord, store.Hotkey);
+        Assert.Equal(ActivationModes.Toggle, store.ActivationMode);
+        Assert.Equal(warningsAfterFirst, store.LoadWarnings.Count);
+    }
 }

@@ -30,10 +30,24 @@ public partial class App : System.Windows.Application
     private readonly DictationCoordinator _coordinator = new();
     private OverlayWindow? _overlay;
     private DispatcherTimer? _releaseTimer;
+    private SingleInstance? _singleInstance;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Task 9 single-instance: the second instance asks the running one
+        // to show its settings window (via the HotkeyWindow broadcast) and
+        // exits — never a second tray icon.
+        _singleInstance = new SingleInstance();
+        if (!_singleInstance.Acquire())
+        {
+            _singleInstance.NotifyRunningInstance();
+            _singleInstance.Dispose();
+            Shutdown();
+            return;
+        }
+
         ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
         _settings = SettingsStore.Load();
         _recorder.AutoStopped += HandleAutoStop;
@@ -73,7 +87,7 @@ public partial class App : System.Windows.Application
         };
         _tray.DoubleClick += (_, _) => HandleToggleInput();
 
-        _hotkeyWindow = new HotkeyWindow(HotkeyId, HandleHotkeyPress);
+        _hotkeyWindow = new HotkeyWindow(HotkeyId, HandleHotkeyPress, OpenSettings);
         RegisterStoredHotkey();
     }
 
@@ -218,6 +232,7 @@ public partial class App : System.Windows.Application
         if (_coordinator.State != DictationState.Recording) return;
         var generation = _coordinator.Generation;
         var token = _coordinator.SessionToken;
+        var hotkeyAt = DateTimeOffset.UtcNow;
         RefreshMenu();
         SetTray("Voice IME — recording… tap hotkey to stop");
         EnsureOverlay();
@@ -232,6 +247,7 @@ public partial class App : System.Windows.Application
         try
         {
             await Task.Run(() => _recorder.Start(), token);
+            Logger.LogLatency("hotkey_to_capture", DateTimeOffset.UtcNow - hotkeyAt);
         }
         catch (OperationCanceledException)
         {
@@ -254,6 +270,7 @@ public partial class App : System.Windows.Application
         RefreshMenu();
         SetTray("Voice IME — transcribing…");
         _overlay?.Show(OverlayPhase.Uploading);
+        var stopAt = DateTimeOffset.UtcNow;
         byte[] wav;
         try
         {
@@ -278,6 +295,8 @@ public partial class App : System.Windows.Application
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
+
+        Logger.LogLatency("capture_to_stop", DateTimeOffset.UtcNow - stopAt);
 
         // Empty audio (or a late stop from an ended session) discards — but a
         // cancelled-while-stopping session must not touch status text.
@@ -311,6 +330,7 @@ public partial class App : System.Windows.Application
     {
         string transcript;
         int usedIndex;
+        var transcribeAt = DateTimeOffset.UtcNow;
         try
         {
             (transcript, usedIndex) = await _llm.TranscribeAsync(
@@ -376,8 +396,12 @@ public partial class App : System.Windows.Application
             ? 0
             : (usedIndex + 1) % _settings.ApiKeys.Count;
         _settings.Save();
+        Logger.LogLatency("capture_to_response", DateTimeOffset.UtcNow - transcribeAt);
+        Logger.LogKeyUsed(usedIndex, _settings.ApiKeys);
+        Logger.LogTranscriptReceived(transcript.Length);
         _clips.Add(transcript);
         RefreshMenu();
+        var pasteAt = DateTimeOffset.UtcNow;
         try
         {
             NativeInput.PasteIntoFocusedWindow(transcript);
@@ -387,6 +411,8 @@ public partial class App : System.Windows.Application
             _coordinator.ReportUploadFailed(generation, new PasteError(), pasteEx);
             return;
         }
+
+        Logger.LogLatency("response_to_paste", DateTimeOffset.UtcNow - pasteAt);
 
         // Commit last: false means a newer session (or cancel) owns the
         // machine — never touch status on a stale completion.
@@ -422,7 +448,8 @@ public partial class App : System.Windows.Application
         SetTray($"Voice IME — {error.UserMessage}");
         if (cause is not null)
         {
-            System.Diagnostics.Trace.WriteLine($"[Dictation] {error.GetType().Name}: {cause.GetType().Name}.");
+            // Type names only — raw exception text may embed key material.
+            Logger.Error($"dictation failed error={error.GetType().Name} cause={cause.GetType().Name}");
         }
 
         _coordinator.AcknowledgeError();
@@ -558,6 +585,8 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _singleInstance?.Dispose();
+        _singleInstance = null;
         _releaseTimer?.Stop();
         _coordinator.Dispose();
         _recorder.Cancel();
