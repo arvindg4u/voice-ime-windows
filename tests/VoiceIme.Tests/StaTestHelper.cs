@@ -50,6 +50,7 @@ internal static class StaTestHelper
             }
         });
         thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
         thread.Start();
         if (!thread.Join(timeout ?? DefaultTimeout))
         {
