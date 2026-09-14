@@ -1,5 +1,5 @@
 using System;
-using System.Drawing;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -17,6 +17,7 @@ public partial class App : System.Windows.Application
 {
     private const int HotkeyId = 0xB001;
     private NotifyIcon? _tray;
+    private Notifier _notifier = new((_, _, _) => { });
     private HotkeyWindow? _hotkeyWindow;
     private readonly AudioRecorder _recorder = new();
     private readonly LlmClient _llm = new();
@@ -24,6 +25,7 @@ public partial class App : System.Windows.Application
     private readonly ClipboardStore _clips = new();
     private CancellationTokenSource? _recordCts;
     private bool _recording;
+    private bool _transcribing;
     private OverlayWindow? _overlay;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -34,6 +36,8 @@ public partial class App : System.Windows.Application
         _recorder.AutoStopped += () => _ = StopAndTranscribeAsync();
         _recorder.LevelChanged += level => _overlay?.SetLevel(level);
 
+        _notifier = new Notifier((title, body, severity) =>
+            _tray?.ShowBalloonTip(3000, title, body, ToToolTipIcon(severity)));
         _tray = new NotifyIcon
         {
             Text = $"Voice IME — {_settings.Hotkey} to dictate",
@@ -47,16 +51,90 @@ public partial class App : System.Windows.Application
         RegisterStoredHotkey();
     }
 
+    /// <summary>
+    /// Handy menu order (Task 7): idle = version (disabled) | Copy Last
+    /// Transcript | Settings… (Ctrl+,) | Quit; busy (recording/uploading) =
+    /// version | Cancel | Copy Last Transcript | Settings… | Quit.
+    /// Rows come from the pure <see cref="TrayMenu"/> model (unit-tested headless);
+    /// this method only translates rows into WinForms items. Existing system
+    /// icons stay — no binary assets in v1.
+    /// </summary>
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add($"Dictate ({_settings.Hotkey})", null, (_, _) => ToggleAsync());
-        menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
-        menu.Items.Add("History…", null, (_, _) => OpenHistory());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Quit", null, (_, _) => Quit());
+        var busy = _recording || _transcribing;
+        var version = GetType().Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        var hasTranscript = _clips.Entries.Any(e => !string.IsNullOrEmpty(e.Text));
+        foreach (var item in TrayMenu.Items(busy, "v" + version, hasTranscript))
+        {
+            menu.Items.Add(TranslateMenuItem(item));
+        }
+
         return menu;
     }
+
+    /// <summary>
+    /// Rebuilds the tray menu after busy/idle or history transitions so the
+    /// Cancel row and Copy enablement track state (Handy behavior).
+    /// </summary>
+    private void RefreshMenu()
+    {
+        if (_tray is null) return;
+        var old = _tray.ContextMenuStrip;
+        _tray.ContextMenuStrip = BuildMenu();
+        old?.Dispose();
+    }
+
+    private ToolStripItem TranslateMenuItem(TrayMenuItem item)
+    {
+        if (item.IsSeparator)
+        {
+            return new ToolStripSeparator();
+        }
+
+        ToolStripMenuItem row = item.Action switch
+        {
+            TrayMenuAction.Cancel => new ToolStripMenuItem(
+                item.Label, System.Drawing.SystemIcons.Exclamation.ToBitmap(),
+                (_, _) => CancelRecording()),
+            TrayMenuAction.CopyLastTranscript => new ToolStripMenuItem(
+                item.Label, System.Drawing.SystemIcons.Application.ToBitmap(),
+                (_, _) => CopyLastTranscript()),
+            TrayMenuAction.Settings => new ToolStripMenuItem(
+                item.Label, System.Drawing.SystemIcons.Shield.ToBitmap(),
+                (_, _) => OpenSettings()),
+            TrayMenuAction.Quit => new ToolStripMenuItem(
+                item.Label, null, (_, _) => Quit()),
+            _ => new ToolStripMenuItem(item.Label),
+        };
+        row.Enabled = item.Enabled;
+        return row;
+    }
+
+    private void CopyLastTranscript()
+    {
+        var latest = _clips.Entries.Count > 0 ? _clips.Entries[0] : null;
+        if (latest is null || string.IsNullOrEmpty(latest.Text))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Windows.Forms.Clipboard.SetText(latest.Text);
+        }
+        catch (Exception ex)
+        {
+            HandleError(new PasteError(), ex);
+        }
+    }
+
+    private static ToolTipIcon ToToolTipIcon(NotificationSeverity severity) => severity switch
+    {
+        NotificationSeverity.Error => ToolTipIcon.Error,
+        NotificationSeverity.Warning => ToolTipIcon.Warning,
+        _ => ToolTipIcon.Info,
+    };
 
     private void ToggleAsync() => _ = _recording ? StopAndTranscribeAsync() : StartRecordingAsync();
 
@@ -65,19 +143,28 @@ public partial class App : System.Windows.Application
         if (_recording) return;
         _recording = true;
         _recordCts = new CancellationTokenSource();
-        SetTray("Voice IME — recording… tap hotkey to stop", balloon: false);
+        RefreshMenu();
+        SetTray("Voice IME — recording… tap hotkey to stop");
         EnsureOverlay();
         _overlay?.Show(OverlayPhase.Recording);
+        if (MicrophoneDevices.ListNames().Count == 0)
+        {
+            HandleError(new RecordingError(RecordingErrorReason.NoDevice));
+            return;
+        }
+
         try
         {
             await Task.Run(() => _recorder.Start(), _recordCts.Token);
         }
+        catch (OperationCanceledException)
+        {
+            // User cancelled before capture started — CancelRecording already
+            // reverted to idle; surfacing an error here would stick one.
+        }
         catch (Exception ex)
         {
-            _recording = false;
-            _overlay?.ShowError("Microphone unavailable");
-            SetTray("Voice IME — microphone unavailable", balloon: true);
-            System.Windows.MessageBox.Show($"Microphone unavailable: {ex.Message}", "Voice IME");
+            HandleError(RecordingError.FromException(ex), ex);
         }
     }
 
@@ -85,7 +172,9 @@ public partial class App : System.Windows.Application
     {
         if (!_recording) return;
         _recording = false;
-        SetTray("Voice IME — transcribing…", balloon: false);
+        _transcribing = true;
+        RefreshMenu();
+        SetTray("Voice IME — transcribing…");
         _overlay?.Show(OverlayPhase.Uploading);
         byte[] wav;
         try
@@ -94,17 +183,29 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            _overlay?.ShowError("Recording failed");
-            SetTray("Voice IME — recording failed", balloon: true);
-            System.Windows.MessageBox.Show($"No audio captured: {ex.Message}", "Voice IME");
+            HandleError(new RecordingError(RecordingErrorReason.Unknown), ex);
             return;
         }
+
         if (wav.Length <= 44)
         {
+            _transcribing = false;
+            RefreshMenu();
             _overlay?.Hide();
-            SetTray("Voice IME — no audio captured", balloon: true);
+            SetTray("Voice IME — no audio captured");
             return;
         }
+
+        await TranscribeAndPasteAsync(wav);
+    }
+
+    /// <summary>
+    /// Upload/transcribe/paste phase of <see cref="StopAndTranscribeAsync"/>.
+    /// All failures funnel through <see cref="HandleError"/>; success clears
+    /// to idle with the overlay hidden.
+    /// </summary>
+    private async Task TranscribeAndPasteAsync(byte[] wav)
+    {
         try
         {
             var (transcript, usedIndex) = await _llm.TranscribeAsync(
@@ -115,9 +216,21 @@ public partial class App : System.Windows.Application
                 : (usedIndex + 1) % _settings.ApiKeys.Count;
             _settings.Save();
             _clips.Add(transcript);
-            NativeInput.PasteIntoFocusedWindow(transcript);
+            RefreshMenu();
+            try
+            {
+                NativeInput.PasteIntoFocusedWindow(transcript);
+            }
+            catch (Exception pasteEx)
+            {
+                HandleError(new PasteError(), pasteEx);
+                return;
+            }
+
+            _transcribing = false;
+            RefreshMenu();
             _overlay?.Hide();
-            SetTray("Voice IME — pasted ✓", balloon: false);
+            SetTray("Voice IME — pasted ✓");
         }
         catch (TranscribeException ex)
         {
@@ -132,14 +245,40 @@ public partial class App : System.Windows.Application
                 history.AttachError(failed.Id, ex.Message);
             }
 
-            _overlay?.ShowError(ex.Message);
-            SetTray($"Voice IME — {ex.Message}", balloon: true);
+            HandleError(TranscriptionError.From(ex), ex);
         }
         catch (Exception ex)
         {
-            _overlay?.ShowError("Something went wrong");
-            SetTray("Voice IME — error", balloon: true);
-            System.Windows.MessageBox.Show(ex.Message, "Voice IME");
+            HandleError(new TranscriptionError("Something went wrong"), ex);
+        }
+    }
+
+    /// <summary>
+    /// Single handler for all typed pipeline errors (Task 7 → Task 8
+    /// contract): atomic revert to idle (flags, menu, overlay) FIRST, then
+    /// one balloon via <see cref="Notifier"/> plus the inline overlay error.
+    /// Never leaves the overlay stuck and never raises UI from a MessageBox —
+    /// all user-visible output routes through the Notifier. Inner exceptions
+    /// are discarded: <see cref="IDictationError.UserMessage"/> strings are
+    /// pre-approved safe, and raw exception text (which may embed key material
+    /// or paths) must never reach the surface.
+    /// </summary>
+    private void HandleError(IDictationError error, Exception? cause = null)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        _recording = false;
+        _transcribing = false;
+        RefreshMenu();
+        _overlay?.ShowError(error.UserMessage);
+        _notifier.Notify(
+            "Voice IME",
+            error.UserMessage,
+            NotificationSeverity.Error,
+            secrets: _settings.ApiKeys);
+        SetTray($"Voice IME — {error.UserMessage}");
+        if (cause is not null)
+        {
+            System.Diagnostics.Trace.WriteLine($"[Dictation] {error.GetType().Name}: {cause.GetType().Name}.");
         }
     }
 
@@ -162,13 +301,14 @@ public partial class App : System.Windows.Application
 
     private void CancelRecording()
     {
-        if (!_recording)
+        if (!_recording && !_transcribing)
         {
             _overlay?.Hide();
             return;
         }
 
         _recording = false;
+        _transcribing = false;
         try
         {
             _recordCts?.Cancel();
@@ -180,7 +320,8 @@ public partial class App : System.Windows.Application
 
         _recorder.Cancel();
         _overlay?.Hide();
-        SetTray("Voice IME — ready", balloon: false);
+        RefreshMenu();
+        SetTray("Voice IME — ready");
     }
 
     // MainWindow singleton: Task 4 deleted SettingsWindow (its Base
@@ -265,11 +406,10 @@ public partial class App : System.Windows.Application
         _mainWindow.Activate();
     }
 
-    private void SetTray(string text, bool balloon)
+    private void SetTray(string text)
     {
         if (_tray is null) return;
         _tray.Text = text.Length > 63 ? text[..63] : text;
-        if (balloon) _tray.ShowBalloonTip(3000, "Voice IME", text, ToolTipIcon.Info);
         _mainWindow?.SetStatus(text);
     }
 
