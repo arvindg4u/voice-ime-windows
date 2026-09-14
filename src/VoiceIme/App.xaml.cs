@@ -582,7 +582,8 @@ public partial class App : System.Windows.Application
             () => new Views.GeneralSettingsView(settings, registrar, listMicrophones),
             () => new Views.GeminiSettingsView(settings),
             () => new Views.HistorySettingsView(clips),
-            () => new Views.AdvancedSettingsView(settings));
+            () => new Views.AdvancedSettingsView(settings),
+            () => new Views.AboutSettingsView(settings));
     }
 
     /// <summary>
@@ -619,7 +620,7 @@ public partial class App : System.Windows.Application
     /// Re-syncs a shell's views with the shared stores before it is shown:
     /// the History view rebinds to the live clips (transcripts dictated while
     /// the window was hidden would otherwise never appear) and the
-    /// General/Gemini fields reload from the live settings. Static with
+    /// General/Gemini/Advanced/About fields reload from the live settings. Static with
     /// explicit stores so the wiring tests can drive it without constructing
     /// the singleton <see cref="System.Windows.Application"/>. Views built
     /// over App's instances observe the same objects dictation reads, so this
@@ -653,6 +654,12 @@ public partial class App : System.Windows.Application
             is Views.AdvancedSettingsView advanced)
         {
             advanced.ReloadFromSettings();
+        }
+
+        if (window.SectionView(MainSection.About)
+            is Views.AboutSettingsView about)
+        {
+            about.ReloadFromSettings();
         }
     }
 

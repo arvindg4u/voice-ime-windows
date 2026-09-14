@@ -182,8 +182,127 @@ public sealed class SettingsStoreTests
             Assert.Equal(ActivationModes.Toggle, loaded.ActivationMode);
             Assert.Equal("", loaded.Microphone);
             Assert.False(loaded.MuteWhileRecording);
+            Assert.Equal(AppThemes.System, loaded.Theme);
+            Assert.Equal(AppLanguages.English, loaded.Language);
             Assert.False(loaded.HasLoadWarnings);
             Assert.Empty(loaded.LoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(AppThemes.System)]
+    [InlineData(AppThemes.Light)]
+    [InlineData(AppThemes.Dark)]
+    public void CoerceTheme_Valid_KeepsValue(string value)
+    {
+        Assert.Equal(value, SettingsStore.CoerceTheme(value));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("charcoal")]
+    [InlineData("SYSTEM")]
+    public void CoerceTheme_Invalid_FallsBackToSystem(string? value)
+    {
+        Assert.Equal(AppThemes.System, SettingsStore.CoerceTheme(value));
+    }
+
+    [Theory]
+    [InlineData(AppLanguages.English)]
+    public void CoerceLanguage_Valid_KeepsValue(string value)
+    {
+        Assert.Equal(value, SettingsStore.CoerceLanguage(value));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("fr")]
+    [InlineData("EN")]
+    public void CoerceLanguage_Invalid_FallsBackToEnglish(string? value)
+    {
+        Assert.Equal(AppLanguages.English, SettingsStore.CoerceLanguage(value));
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsAboutSettings()
+    {
+        if (!OperatingSystem.IsWindows()) return; // Save uses DPAPI
+
+        // Temp-file redirect: the real %AppData% file is never touched.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var store = new SettingsStore
+            {
+                Theme = AppThemes.Dark,
+                Language = AppLanguages.English,
+            };
+            store.Save();
+
+            var reloaded = SettingsStore.Load();
+
+            Assert.Equal(AppThemes.Dark, reloaded.Theme);
+            Assert.Equal(AppLanguages.English, reloaded.Language);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_OldFileWithoutAboutFields_UsesDefaults()
+    {
+        // Pre-Task-2 file — no theme/language keys, and no
+        // apiKeysProtected so no DPAPI call happens (any-OS safe).
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(AppThemes.System, loaded.Theme);
+            Assert.Equal(AppLanguages.English, loaded.Language);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_BadThemeAndLanguage_CoercesToDefaultsWithWarning()
+    {
+        // Unknown preference strings coerce, never throw.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"theme":"charcoal","language":"fr"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(AppThemes.System, loaded.Theme);
+            Assert.Equal(AppLanguages.English, loaded.Language);
+            Assert.True(loaded.HasLoadWarnings);
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("theme"));
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("language"));
         }
         finally
         {

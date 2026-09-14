@@ -62,6 +62,11 @@ public sealed class SettingsStore
     /// <summary>Transcript-history cap (drives ClipboardStore). Clamped 10–500.</summary>
     public int HistoryLimit { get; set; } = DefaultHistoryLimit;
 
+    // Task 2 (Handy parity gaps): About screen fields. Same contract —
+    // additive, field-level defaults, coerce-don't-throw, no version bump.
+    public string Theme { get; set; } = AppThemes.System;
+    public string Language { get; set; } = AppLanguages.English;
+
     /// <summary>
     /// Non-fatal problems from the last <see cref="Load"/> (corrupt file,
     /// bad enum string, undecryptable keys, unknown newer version). Empty on
@@ -138,6 +143,8 @@ public sealed class SettingsStore
         Microphone ??= "";
         PasteMethod = CoercePasteMethod(PasteMethod, Warn);
         HistoryLimit = ClampHistoryLimit(HistoryLimit);
+        Theme = CoerceTheme(Theme, Warn);
+        Language = CoerceLanguage(Language, Warn);
         if (KeyCursor < 0)
         {
             KeyCursor = 0;
@@ -153,6 +160,8 @@ public sealed class SettingsStore
         Microphone ??= "";
         PasteMethod = CoercePasteMethod(PasteMethod);
         HistoryLimit = ClampHistoryLimit(HistoryLimit);
+        Theme = CoerceTheme(Theme);
+        Language = CoerceLanguage(Language);
         SchemaVersion = CurrentSchemaVersion;
         var dir = Path.GetDirectoryName(SettingsPath)!;
         Directory.CreateDirectory(dir);
@@ -177,6 +186,8 @@ public sealed class SettingsStore
             showOverlay = ShowOverlay,
             pasteMethod = PasteMethod,
             historyLimit = HistoryLimit,
+            theme = Theme,
+            language = Language,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
@@ -237,6 +248,59 @@ public sealed class SettingsStore
     }
 
     /// <summary>
+    /// Bad theme strings fall back to System (warns via the same
+    /// coerce-don't-throw contract as paste method). An unknown selection
+    /// must never break load; the concrete theme follows the OS.
+    /// </summary>
+    internal static string CoerceTheme(string? value) => CoerceTheme(value, null);
+
+    internal static string CoerceTheme(string? value, Action<string>? onWarning)
+    {
+        if (AppThemes.IsValid(value))
+        {
+            return value!;
+        }
+
+        var message = $"Invalid theme {value ?? "<null>"} — using default {AppThemes.System}.";
+        if (onWarning is not null)
+        {
+            onWarning(message);
+        }
+        else
+        {
+            System.Diagnostics.Trace.WriteLine("[Settings] " + message);
+        }
+
+        return AppThemes.System;
+    }
+
+    /// <summary>
+    /// Bad language strings fall back to English (warns via the same
+    /// coerce-don't-throw contract). The v1 catalog is English-only.
+    /// </summary>
+    internal static string CoerceLanguage(string? value) => CoerceLanguage(value, null);
+
+    internal static string CoerceLanguage(string? value, Action<string>? onWarning)
+    {
+        if (AppLanguages.IsValid(value))
+        {
+            return value!;
+        }
+
+        var message = $"Invalid language {value ?? "<null>"} — using default {AppLanguages.English}.";
+        if (onWarning is not null)
+        {
+            onWarning(message);
+        }
+        else
+        {
+            System.Diagnostics.Trace.WriteLine("[Settings] " + message);
+        }
+
+        return AppLanguages.English;
+    }
+
+    /// <summary>
     /// History cap clamp: values below 10 pin to 10, above 500 pin to 500.
     /// Pure range check — no warnings (a clamped limit is still a valid
     /// limit, unlike an unknown enum string).
@@ -289,6 +353,8 @@ public sealed class SettingsStore
         ShowOverlay = GetBool(root, "showOverlay", ShowOverlay);
         PasteMethod = CoercePasteMethod(GetString(root, "pasteMethod", PasteMethods.CtrlV), Warn);
         HistoryLimit = ClampHistoryLimit(GetInt(root, "historyLimit", HistoryLimit));
+        Theme = CoerceTheme(GetString(root, "theme", AppThemes.System), Warn);
+        Language = CoerceLanguage(GetString(root, "language", AppLanguages.English), Warn);
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
         // already read above.
@@ -403,6 +469,18 @@ public sealed class SettingsStore
         if (historyLimit.HasValue)
         {
             HistoryLimit = ClampHistoryLimit(historyLimit.Value);
+        }
+
+        var theme = SalvageString(raw, "theme");
+        if (theme is not null)
+        {
+            Theme = CoerceTheme(theme, Warn);
+        }
+
+        var language = SalvageString(raw, "language");
+        if (language is not null)
+        {
+            Language = CoerceLanguage(language, Warn);
         }
 
         var version = SalvageInt(raw, "schemaVersion");

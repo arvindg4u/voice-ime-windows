@@ -45,21 +45,23 @@ public partial class MainWindow : Window
             () => new Views.GeneralSettingsView(),
             () => new Views.GeminiSettingsView(),
             () => new Views.HistorySettingsView(),
-            () => new Views.AdvancedSettingsView())
+            () => new Views.AdvancedSettingsView(),
+            () => new Views.AboutSettingsView())
     {
     }
 
     /// <summary>
-    /// Test seam: callers inject the General/Gemini/History/Advanced section
-    /// views (headless tests pass no factory or a non-UI placeholder); null
-    /// disables that section's registration so construction never requires a
-    /// window station.
+    /// Test seam: callers inject the General/Gemini/History/Advanced/About
+    /// section views (headless tests pass no factory or a non-UI
+    /// placeholder); null disables that section's registration so
+    /// construction never requires a window station.
     /// </summary>
     internal MainWindow(
         Func<object?>? createGeneralView,
         Func<object?>? createGeminiView = null,
         Func<object?>? createHistoryView = null,
-        Func<object?>? createAdvancedView = null)
+        Func<object?>? createAdvancedView = null,
+        Func<object?>? createAboutView = null)
     {
         InitializeComponent();
         VersionText.Text = "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
@@ -88,13 +90,19 @@ public partial class MainWindow : Window
             RegisterSectionView(MainSection.Advanced, advanced);
         }
 
+        var about = createAboutView?.Invoke();
+        if (about is not null)
+        {
+            RegisterSectionView(MainSection.About, about);
+        }
+
         NavigateTo(MainSection.General);
     }
 
     /// <summary>
     /// Shows the section's registered view, or a placeholder until its
-    /// Views/* screen lands (About remains a placeholder). Safe to call
-    /// before Show(). Must be called on the UI thread.
+    /// Views/* screen lands. Safe to call before Show(). Must be called on
+    /// the UI thread.
     /// </summary>
     public void NavigateTo(MainSection section)
     {

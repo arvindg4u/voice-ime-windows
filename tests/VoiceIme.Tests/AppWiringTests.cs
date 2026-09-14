@@ -73,6 +73,29 @@ public sealed class AppWiringTests : IDisposable
     }
 
     [Fact]
+    public void CreateMainWindow_BindsLiveSettingsToAbout()
+    {
+        TryRunOnSta(() =>
+        {
+            var settings = new SettingsStore();
+            var clips = new ClipboardStore(PathFor("about.json"));
+            var window = App.CreateMainWindow(
+                settings, clips, new NullHotkeyRegistrar(), () => Array.Empty<string>());
+            try
+            {
+                Assert.Same(
+                    settings,
+                    Assert.IsType<AboutSettingsView>(
+                        window.SectionView(MainSection.About)).BoundSettings);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void CreateMainWindow_BindsLiveClipsToHistory()
     {
         TryRunOnSta(() =>
@@ -150,6 +173,7 @@ public sealed class AppWiringTests : IDisposable
                 settings.Model = "test-model";
                 settings.StartHidden = true;
                 settings.HistoryLimit = 42;
+                settings.Theme = AppThemes.Dark;
                 clips.Add("dictated while hidden");
 
                 App.RefreshSectionViews(window, settings, clips);
@@ -162,11 +186,14 @@ public sealed class AppWiringTests : IDisposable
                     window.SectionView(MainSection.History));
                 var advanced = Assert.IsType<AdvancedSettingsView>(
                     window.SectionView(MainSection.Advanced));
+                var about = Assert.IsType<AboutSettingsView>(
+                    window.SectionView(MainSection.About));
                 Assert.Equal("Alt+F4", general.HotkeyLabel);
                 Assert.Equal("test-model", gemini.ModelText);
                 Assert.Equal("dictated while hidden", Assert.Single(history.Rows).Body);
                 Assert.True(advanced.StartHiddenChecked == true);
                 Assert.Equal("42", advanced.HistoryLimitText);
+                Assert.Equal(AppThemes.LabelFor(AppThemes.Dark), about.SelectedThemeLabel);
             }
             finally
             {
