@@ -61,13 +61,16 @@ public sealed class SettingsStoreTests
             };
             store.Save();
 
-            // Self-diagnosing: capture the raw file BEFORE Load so a future
-            // failure shows whether Save coerced the value (missing here) or
-            // Load read a different file (present here, absent on reload).
+            // Self-diagnosing: parse the raw file BEFORE Load so a future
+            // failure shows whether Save coerced the value or Load read a
+            // different file. Parsed (not substring) because System.Text.Json
+            // escapes "+" as + on the wire — the value is correct when
+            // the parsed "hotkey" property equals, regardless of escaping.
             var rawAfterSave = File.ReadAllText(path);
-            Assert.True(
-                rawAfterSave.Contains("Alt+F4", StringComparison.Ordinal),
-                "Save did not persist Alt+F4. Raw file was: " + rawAfterSave);
+            Assert.Equal(
+                "Alt+F4",
+                System.Text.Json.JsonDocument.Parse(rawAfterSave)
+                    .RootElement.GetProperty("hotkey").GetString());
 
             // Act
             var reloaded = SettingsStore.Load();
@@ -79,7 +82,10 @@ public sealed class SettingsStoreTests
             Assert.True(reloaded.MuteWhileRecording);
 
             var raw = File.ReadAllText(path);
-            Assert.Contains("Alt+F4", raw);
+            Assert.Equal(
+                "Alt+F4",
+                System.Text.Json.JsonDocument.Parse(raw)
+                    .RootElement.GetProperty("hotkey").GetString());
         }
         finally
         {
