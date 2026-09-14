@@ -41,24 +41,30 @@ public partial class MainWindow : Window
     public MainSection CurrentSection { get; private set; } = MainSection.General;
 
     public MainWindow()
-        : this(() => new Views.GeneralSettingsView())
+        : this(() => new Views.GeneralSettingsView(), () => new Views.GeminiSettingsView())
     {
     }
 
     /// <summary>
-    /// Test seam: callers inject the General section view (headless tests
-    /// pass no factory or a non-UI placeholder); null disables the default
-    /// General registration so construction never requires a window station.
+    /// Test seam: callers inject the General/Gemini section views (headless
+    /// tests pass no factory or a non-UI placeholder); null disables that
+    /// section's registration so construction never requires a window station.
     /// </summary>
-    internal MainWindow(Func<object?>? createGeneralView)
+    internal MainWindow(Func<object?>? createGeneralView, Func<object?>? createGeminiView = null)
     {
         InitializeComponent();
         VersionText.Text = "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
         BuildNav();
-        var view = createGeneralView?.Invoke();
-        if (view is not null)
+        var general = createGeneralView?.Invoke();
+        if (general is not null)
         {
-            RegisterSectionView(MainSection.General, view);
+            RegisterSectionView(MainSection.General, general);
+        }
+
+        var gemini = createGeminiView?.Invoke();
+        if (gemini is not null)
+        {
+            RegisterSectionView(MainSection.Gemini, gemini);
         }
 
         NavigateTo(MainSection.General);

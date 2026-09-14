@@ -121,9 +121,10 @@ public partial class App : System.Windows.Application
         }
     }
 
-    // MainWindow singleton: Task 4 deletes SettingsWindow and Task 5 deletes
-    // HistoryWindow; the legacy files stay in the build (compiling but
-    // unreferenced) until then. Tasks 4/5 wire the matching sections here.
+    // MainWindow singleton: Task 4 deleted SettingsWindow (its Base
+    // URL/keys/model/prompt fields live in Views.GeminiSettingsView now);
+    // Task 5 deletes HistoryWindow, which stays in the build (compiling but
+    // unreferenced) until then.
     //
     // Task 3: the stored hotkey owns the live global registration, not a
     // hardcoded chord — App registers whatever SettingsStore holds (invalid
@@ -156,11 +157,16 @@ public partial class App : System.Windows.Application
 
     private MainWindow? _mainWindow;
 
+    /// <summary>
+    /// Opens the settings shell on the Gemini section (the rehomed legacy
+    /// SettingsWindow content). History keeps its own entry point until
+    /// Task 5 rehomes HistoryWindow.
+    /// </summary>
     internal void OpenSettings()
     {
         _mainWindow ??= new MainWindow();
         AttachLiveHotkey(_mainWindow);
-        _mainWindow.NavigateTo(MainSection.General);
+        _mainWindow.NavigateTo(MainSection.Gemini);
         ShowMainWindow();
     }
 
