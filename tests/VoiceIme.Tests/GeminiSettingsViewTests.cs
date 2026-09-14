@@ -42,7 +42,7 @@ public sealed class GeminiSettingsViewTests
     {
         var keys = GeminiSettingsView.SplitKeys("  key-1  \n\n   \nkey-2\n\tkey-3\t\n");
 
-        Assert.Equal(["key-1", "key-2", "key-3"], keys.ToArray());
+        Assert.True(keys.SequenceEqual(["key-1", "key-2", "key-3"]));
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class GeminiSettingsViewTests
 
             Assert.True(ok);
             Assert.Equal("https://example.test/v1beta", store.BaseUrl);
-            Assert.Equal(["key-1", "key-2"], store.ApiKeys.ToArray());
+            Assert.True(store.ApiKeys.SequenceEqual(["key-1", "key-2"]));
             Assert.Equal("test-model", store.Model);
             Assert.Equal("polish it", store.CustomPrompt);
             Assert.Equal("Saved ✓", view.StatusMessage);

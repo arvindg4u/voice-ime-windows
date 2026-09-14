@@ -26,7 +26,7 @@ public sealed class SettingsStoreTests
             store.Save();
 
             var reloaded = SettingsStore.Load();
-            Assert.Equal(["synthetic-key-1", "synthetic-key-2"], reloaded.ApiKeys);
+            Assert.True(reloaded.ApiKeys.SequenceEqual(["synthetic-key-1", "synthetic-key-2"]));
             Assert.Equal("synthetic-model", reloaded.Model);
 
             var raw = File.ReadAllText(path);
