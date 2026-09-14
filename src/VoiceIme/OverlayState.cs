@@ -24,6 +24,11 @@ public sealed record OverlayState(OverlayPhase Phase, float Level, string? Messa
     public static OverlayState Initial { get; } = new(OverlayPhase.Recording, 0f);
 
     /// <summary>
+    /// Ellipsis steps in the uploading label cycle ("" through "...").
+    /// </summary>
+    public const int EllipsisPhaseCount = 4;
+
+    /// <summary>
     /// Formats an elapsed duration as m:ss ("0:00", "0:05", "1:05", "10:00").
     /// Negative inputs clamp to zero.
     /// </summary>
@@ -31,6 +36,18 @@ public sealed record OverlayState(OverlayPhase Phase, float Level, string? Messa
     {
         var totalSeconds = Math.Max(0, (long)elapsed.TotalSeconds);
         return $"{totalSeconds / 60}:{totalSeconds % 60:00}";
+    }
+
+    /// <summary>
+    /// Formats the indeterminate uploading label for a 1 s timer tick (the
+    /// whole-second elapsed count): cycles "Sending" → "Sending." →
+    /// "Sending.." → "Sending..." then wraps. Negative ticks wrap
+    /// (tick -1 shows three dots), so any tick is safe.
+    /// </summary>
+    public static string FormatUploadingLabel(int tick)
+    {
+        var phase = ((tick % EllipsisPhaseCount) + EllipsisPhaseCount) % EllipsisPhaseCount;
+        return "Sending" + new string('.', phase);
     }
 
     /// <summary>

@@ -31,6 +31,24 @@ public sealed class OverlayStateTests
         Assert.Equal("0:00", OverlayState.FormatElapsed(TimeSpan.FromSeconds(-30)));
     }
 
+    [Theory]
+    [InlineData(0, "Sending")]
+    [InlineData(1, "Sending.")]
+    [InlineData(2, "Sending..")]
+    [InlineData(3, "Sending...")]
+    [InlineData(4, "Sending")]
+    [InlineData(7, "Sending...")]
+    public void FormatUploadingLabel_CyclesEllipsis(int tick, string expected)
+    {
+        Assert.Equal(expected, OverlayState.FormatUploadingLabel(tick));
+    }
+
+    [Fact]
+    public void FormatUploadingLabel_WrapsNegativeTicks()
+    {
+        Assert.Equal("Sending...", OverlayState.FormatUploadingLabel(-1));
+    }
+
     [Fact]
     public void WithPhase_ResetsLevelAndReplacesMessage()
     {

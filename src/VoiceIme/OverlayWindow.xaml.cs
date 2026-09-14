@@ -35,6 +35,7 @@ public partial class OverlayWindow : Window
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _errorTimer;
     private DateTime _phaseStartUtc = DateTime.UtcNow;
+    private int _uploadTicks;
     private readonly System.Windows.Shapes.Rectangle[] _bars = new System.Windows.Shapes.Rectangle[WaveBarCount];
 
     /// <summary>Invoked (UI thread) when the cancel button is pressed.</summary>
@@ -85,6 +86,7 @@ public partial class OverlayWindow : Window
             phase, phase == OverlayPhase.Error ? "Something went wrong" : null);
         _level = 0f;
         _phaseStartUtc = DateTime.UtcNow;
+        _uploadTicks = 0;
         Render();
         PositionBottomCenter();
         _timer.Start();
@@ -220,7 +222,9 @@ public partial class OverlayWindow : Window
 
         WavePanel.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
         SendingLabel.Visibility = uploading ? Visibility.Visible : Visibility.Collapsed;
-        TimerText.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
+        // The timer shows the capture duration while recording and keeps
+        // climbing while uploading (indeterminate — no backend streaming).
+        TimerText.Visibility = recording || uploading ? Visibility.Visible : Visibility.Collapsed;
         ErrorText.Visibility = error ? Visibility.Visible : Visibility.Collapsed;
         if (error)
         {
@@ -233,12 +237,22 @@ public partial class OverlayWindow : Window
 
     private void RefreshTimer()
     {
-        if (_state.Phase != OverlayPhase.Recording)
+        if (_state.Phase == OverlayPhase.Recording)
+        {
+            TimerText.Text = OverlayState.FormatElapsed(DateTime.UtcNow - _phaseStartUtc);
+            return;
+        }
+
+        if (_state.Phase != OverlayPhase.Uploading)
         {
             return;
         }
 
+        // Indeterminate upload: elapsed readout on the right, and the label
+        // bumps one dot per 1 s tick on the shared timer.
         TimerText.Text = OverlayState.FormatElapsed(DateTime.UtcNow - _phaseStartUtc);
+        SendingLabel.Text = OverlayState.FormatUploadingLabel(_uploadTicks);
+        _uploadTicks++;
     }
 
     private void RenderWaveform()
