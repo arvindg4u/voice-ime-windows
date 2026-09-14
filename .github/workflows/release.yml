@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Run unit tests
+        run: dotnet test VoiceIme.Windows.sln -c Release
+
+      - name: Publish single-file EXE
+        run: >
+          dotnet publish src/VoiceIme/VoiceIme.csproj -c Release
+          -r win-x64 --self-contained
+          /p:PublishSingleFile=true
+          /p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish
+
+      - name: Attach EXE to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/VoiceIme.exe
+          generate_release_notes: true

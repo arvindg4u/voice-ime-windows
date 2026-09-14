@@ -1,0 +1,33 @@
+name: Windows
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Run unit tests
+        run: dotnet test VoiceIme.Windows.sln -c Release
+
+      - name: Publish single-file EXE
+        run: >
+          dotnet publish src/VoiceIme/VoiceIme.csproj -c Release
+          -r win-x64 --self-contained
+          /p:PublishSingleFile=true
+          /p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-ime-windows
+          path: publish/VoiceIme.exe

@@ -1,0 +1,29 @@
+<Window x:Class="VoiceIme.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Voice IME — Settings" Width="480" Height="600"
+        WindowStartupLocation="CenterScreen">
+    <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="Base URL" FontWeight="SemiBold"/>
+            <TextBox x:Name="BaseUrlBox" Margin="0,4,0,12"/>
+            <TextBlock Text="API keys (one per line — auto-rotates on rate limit)" FontWeight="SemiBold"/>
+            <TextBox x:Name="KeysBox" AcceptsReturn="True" Height="90" Margin="0,4,0,12"
+                     VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+            <TextBlock Text="Model" FontWeight="SemiBold"/>
+            <TextBox x:Name="ModelBox" Margin="0,4,0,12"/>
+            <TextBlock Text="Custom prompt (max 2000 chars, blank to disable)" FontWeight="SemiBold"/>
+            <TextBox x:Name="PromptBox" AcceptsReturn="True" Height="90" Margin="0,4,0,12"
+                     VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+            <TextBlock Margin="0,4,0,12" Foreground="Gray" TextWrapping="Wrap">
+                Hotkey: Ctrl+Shift+Space, works from any app. Tip: put VoiceIme.exe
+                in the Startup folder to launch at login.
+            </TextBlock>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="TestButton" Content="Test" Width="90" Margin="0,0,8,0" Click="TestButton_Click"/>
+                <Button x:Name="SaveButton" Content="Save" Width="90" IsDefault="True" Click="SaveButton_Click"/>
+            </StackPanel>
+            <TextBlock x:Name="StatusText" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="Gray"/>
+        </StackPanel>
+    </ScrollViewer>
+</Window>
