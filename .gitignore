@@ -7,3 +7,5 @@ publish/
 *.user
 .vs/
 *.suo
+# Handy reference clone — read-only inspiration, never committed
+handy-reference/
