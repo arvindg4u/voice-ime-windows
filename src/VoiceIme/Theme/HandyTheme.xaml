@@ -123,6 +123,8 @@
     <!--
         Group header: 12px, gray. Consumers uppercase the text (WPF
         TextBlock has no letter-spacing/text-transform property).
+        Wide letter-tracking from the Handy web UI is intentionally not
+        implemented: WPF TextBlock exposes no tracking property.
     -->
     <Style x:Key="HandyGroupHeader" TargetType="TextBlock">
         <Setter Property="FontSize" Value="12" />
