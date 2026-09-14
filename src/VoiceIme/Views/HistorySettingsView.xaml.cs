@@ -20,7 +20,7 @@ namespace VoiceIme.Views;
 /// Delete/ClearUnpinned). Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.History, view).
 /// </summary>
-public partial class HistorySettingsView : UserControl
+public partial class HistorySettingsView : System.Windows.Controls.UserControl
 {
     internal const int PreviewLength = 80;
     internal const string RedictateHint = "Audio isn't kept — press your dictation hotkey and speak again.";
@@ -167,7 +167,7 @@ public partial class HistorySettingsView : UserControl
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Guid id })
+        if (sender is System.Windows.Controls.Button { Tag: Guid id })
         {
             CopyEntry(id);
         }
@@ -175,7 +175,7 @@ public partial class HistorySettingsView : UserControl
 
     private void PinButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Guid id })
+        if (sender is System.Windows.Controls.Button { Tag: Guid id })
         {
             TogglePinEntry(id);
         }
@@ -183,7 +183,7 @@ public partial class HistorySettingsView : UserControl
 
     private void DeleteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Guid id })
+        if (sender is System.Windows.Controls.Button { Tag: Guid id })
         {
             DeleteEntry(id);
         }
@@ -191,7 +191,7 @@ public partial class HistorySettingsView : UserControl
 
     private void RetryButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Guid id })
+        if (sender is System.Windows.Controls.Button { Tag: Guid id })
         {
             RetryEntry(id);
         }

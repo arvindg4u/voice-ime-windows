@@ -19,7 +19,7 @@ namespace VoiceIme.Views;
 /// Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.Gemini, view).
 /// </summary>
-public partial class GeminiSettingsView : UserControl
+public partial class GeminiSettingsView : System.Windows.Controls.UserControl
 {
     internal const int MaxPromptLength = 2000;
 

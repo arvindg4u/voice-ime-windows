@@ -19,7 +19,7 @@ namespace VoiceIme.Views;
 /// Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.General, view).
 /// </summary>
-public partial class GeneralSettingsView : UserControl
+public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 {
     private const string UnavailableSuffix = " (unavailable)";
 
@@ -125,7 +125,7 @@ public partial class GeneralSettingsView : UserControl
         StartCapture();
     }
 
-    private void HotkeyChip_KeyDown(object sender, KeyEventArgs e)
+    private void HotkeyChip_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (!_capturing && (e.Key == Key.Enter || e.Key == Key.Space))
         {
@@ -161,7 +161,7 @@ public partial class GeneralSettingsView : UserControl
         ClearHotkeyError();
     }
 
-    private void OnCaptureKeyDown(object sender, KeyEventArgs e)
+    private void OnCaptureKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (!_capturing)
         {
@@ -197,7 +197,7 @@ public partial class GeneralSettingsView : UserControl
         HotkeyText.Text = FormatCapturePreview();
     }
 
-    private void OnCaptureKeyUp(object sender, KeyEventArgs e)
+    private void OnCaptureKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (!_capturing)
         {

@@ -34,7 +34,7 @@ public partial class MainWindow : Window
     public static void SetIsNavActive(DependencyObject target, bool value) =>
         target.SetValue(IsNavActiveProperty, value);
 
-    private readonly Dictionary<MainSection, Button> _navButtons = new();
+    private readonly Dictionary<MainSection, System.Windows.Controls.Button> _navButtons = new();
     private readonly Dictionary<MainSection, object> _sectionViews = new();
     private bool _permitClose;
 
@@ -146,7 +146,7 @@ public partial class MainWindow : Window
     internal void PermitClose() => _permitClose = true;
 
     /// <summary>Test seam: the sidebar button backing a section.</summary>
-    internal Button NavButtonFor(MainSection section) => _navButtons[section];
+    internal System.Windows.Controls.Button NavButtonFor(MainSection section) => _navButtons[section];
 
     protected override void OnClosing(CancelEventArgs e)
     {
@@ -164,7 +164,7 @@ public partial class MainWindow : Window
         foreach (var section in MainNav.Ordered)
         {
             var captured = section;
-            var button = new Button
+            var button = new System.Windows.Controls.Button
             {
                 Style = (Style)FindResource("HandyNavButton"),
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,

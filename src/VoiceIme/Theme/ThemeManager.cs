@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using Color = System.Windows.Media.Color;
 
 namespace VoiceIme.Theme;
 

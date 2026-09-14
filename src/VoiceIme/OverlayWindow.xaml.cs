@@ -35,7 +35,7 @@ public partial class OverlayWindow : Window
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _errorTimer;
     private DateTime _phaseStartUtc = DateTime.UtcNow;
-    private readonly Rectangle[] _bars = new Rectangle[WaveBarCount];
+    private readonly System.Windows.Shapes.Rectangle[] _bars = new System.Windows.Shapes.Rectangle[WaveBarCount];
 
     /// <summary>Invoked (UI thread) when the cancel button is pressed.</summary>
     public event Action? CancelRequested;
@@ -51,7 +51,7 @@ public partial class OverlayWindow : Window
         InitializeComponent();
         for (var i = 0; i < WaveBarCount; i++)
         {
-            var bar = new Rectangle
+            var bar = new System.Windows.Shapes.Rectangle
             {
                 Width = WaveBarWidth,
                 Height = 3,
