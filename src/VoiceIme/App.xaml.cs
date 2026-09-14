@@ -24,6 +24,7 @@ public partial class App : System.Windows.Application
     private readonly ClipboardStore _clips = new();
     private CancellationTokenSource? _recordCts;
     private bool _recording;
+    private OverlayWindow? _overlay;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -31,6 +32,7 @@ public partial class App : System.Windows.Application
         ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
         _settings = SettingsStore.Load();
         _recorder.AutoStopped += () => _ = StopAndTranscribeAsync();
+        _recorder.LevelChanged += level => _overlay?.SetLevel(level);
 
         _tray = new NotifyIcon
         {
@@ -64,6 +66,8 @@ public partial class App : System.Windows.Application
         _recording = true;
         _recordCts = new CancellationTokenSource();
         SetTray("Voice IME — recording… tap hotkey to stop", balloon: false);
+        EnsureOverlay();
+        _overlay?.Show(OverlayPhase.Recording);
         try
         {
             await Task.Run(() => _recorder.Start(), _recordCts.Token);
@@ -71,6 +75,7 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             _recording = false;
+            _overlay?.ShowError("Microphone unavailable");
             SetTray("Voice IME — microphone unavailable", balloon: true);
             System.Windows.MessageBox.Show($"Microphone unavailable: {ex.Message}", "Voice IME");
         }
@@ -81,6 +86,7 @@ public partial class App : System.Windows.Application
         if (!_recording) return;
         _recording = false;
         SetTray("Voice IME — transcribing…", balloon: false);
+        _overlay?.Show(OverlayPhase.Uploading);
         byte[] wav;
         try
         {
@@ -88,12 +94,14 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
+            _overlay?.ShowError("Recording failed");
             SetTray("Voice IME — recording failed", balloon: true);
             System.Windows.MessageBox.Show($"No audio captured: {ex.Message}", "Voice IME");
             return;
         }
         if (wav.Length <= 44)
         {
+            _overlay?.Hide();
             SetTray("Voice IME — no audio captured", balloon: true);
             return;
         }
@@ -108,6 +116,7 @@ public partial class App : System.Windows.Application
             _settings.Save();
             _clips.Add(transcript);
             NativeInput.PasteIntoFocusedWindow(transcript);
+            _overlay?.Hide();
             SetTray("Voice IME — pasted ✓", balloon: false);
         }
         catch (TranscribeException ex)
@@ -123,13 +132,55 @@ public partial class App : System.Windows.Application
                 history.AttachError(failed.Id, ex.Message);
             }
 
+            _overlay?.ShowError(ex.Message);
             SetTray($"Voice IME — {ex.Message}", balloon: true);
         }
         catch (Exception ex)
         {
+            _overlay?.ShowError("Something went wrong");
             SetTray("Voice IME — error", balloon: true);
             System.Windows.MessageBox.Show(ex.Message, "Voice IME");
         }
+    }
+
+    /// <summary>
+    /// Lazily creates the recording overlay (a Window needs a window station,
+    /// so construction is deferred until first dictation). Cancel discards
+    /// the in-flight capture and hides the overlay — Task 8 owns the full
+    /// coordinator with its CancelCurrentOperation entry point.
+    /// </summary>
+    private void EnsureOverlay()
+    {
+        if (_overlay is not null)
+        {
+            return;
+        }
+
+        _overlay = new OverlayWindow();
+        _overlay.CancelRequested += CancelRecording;
+    }
+
+    private void CancelRecording()
+    {
+        if (!_recording)
+        {
+            _overlay?.Hide();
+            return;
+        }
+
+        _recording = false;
+        try
+        {
+            _recordCts?.Cancel();
+        }
+        catch
+        {
+            // Best effort: capture stops below regardless.
+        }
+
+        _recorder.Cancel();
+        _overlay?.Hide();
+        SetTray("Voice IME — ready", balloon: false);
     }
 
     // MainWindow singleton: Task 4 deleted SettingsWindow (its Base
@@ -235,6 +286,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _recorder.Cancel();
+        _overlay?.Close();
         _hotkeyWindow?.Dispose();
         if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); }
         _llm.Dispose();
