@@ -51,7 +51,7 @@
         </Style>
     </Window.Resources>
     <DockPanel>
-        <!-- Footer: left = tray status, right = update placeholder + version. -->
+        <!-- Footer: left = tray status, right = updates note + version. -->
         <Border DockPanel.Dock="Bottom"
                 BorderBrush="{DynamicResource HandyCardBorder}" BorderThickness="0,1,0,0"
                 Background="{DynamicResource HandyBackground}">
@@ -61,7 +61,7 @@
                            Text="Voice IME — ready" />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock FontSize="12" Foreground="{DynamicResource HandyMidGray}"
-                               Text="Updates coming soon" />
+                               Text="Updates via Releases" />
                     <TextBlock FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                Margin="4,0" Text="•" />
                     <TextBlock x:Name="VersionText" FontSize="12"
