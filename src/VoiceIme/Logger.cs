@@ -31,14 +31,14 @@ public static class Logger
     public const string LogFileName = "voiceime.log";
 
     private static readonly object Gate = new();
-    private static Action<string>? _filePathOverride;
+    private static Func<string, string>? _filePathOverride;
 
     /// <summary>
-    /// Test hook: redirects the log file to a temp path (see
+    /// Test hook: maps the log file name to a temp path (see
     /// <see cref="SettingsStore.SettingsPathOverride"/>). Never set in
     /// production; tests must reset it to null in a finally block.
     /// </summary>
-    internal static Action<string>? FilePathOverride
+    internal static Func<string, string>? FilePathOverride
     {
         get => _filePathOverride;
         set => _filePathOverride = value;

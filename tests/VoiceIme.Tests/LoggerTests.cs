@@ -229,11 +229,13 @@ public sealed class LoggerTests
             (_, _, _) => throw new InvalidOperationException("synthetic"),
             showMessage: 0);
 
-        Assert.False(gate.Acquire("test-name"));
+        // Fail-open: an unproven mutex failure runs alone rather than exiting
+        // with no instance at all — a duplicate tray icon beats no app.
+        Assert.True(gate.Acquire("test-name"));
+        Assert.True(gate.IsFirstInstance);
 
         // Message id 0 (registration failed) and a throwing broadcast both
-        // degrade silently — a duplicate tray icon beats no app at all.
+        // degrade silently — the running window just stays hidden.
         gate.NotifyRunningInstance();
-        Assert.False(gate.IsFirstInstance);
     }
 }

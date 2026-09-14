@@ -45,11 +45,11 @@ public sealed class SingleInstance : IDisposable
     public bool IsFirstInstance { get; private set; }
 
     /// <summary>
-    /// Acquires the named mutex. Returns false when another instance owns it.
-    /// NOTE: creating an owned mutex on an existing name does NOT throw —
-    /// the winner is decided by <c>createdNew</c>. Never throws: an
-    /// unexpected Win32 failure lets the app run (a duplicate tray icon
-    /// beats no app at all).
+    /// Acquires the named mutex. Returns false ONLY when another instance
+    /// provably owns it (<c>createdNew == false</c> — creating an owned mutex
+    /// on an existing name does NOT throw). Fail-open: an unexpected Win32
+    /// error returns first-instance so the app still runs (a duplicate tray
+    /// icon beats no app at all). Never throws.
     /// </summary>
     public bool Acquire(string name = "VoiceIme.SingleInstance")
     {
@@ -69,8 +69,10 @@ public sealed class SingleInstance : IDisposable
         }
         catch
         {
-            IsFirstInstance = false;
-            return false;
+            // Unproven — no mutex was acquired, so nobody proved a first
+            // instance exists. Run alone rather than exiting with none.
+            IsFirstInstance = true;
+            return true;
         }
     }
 
