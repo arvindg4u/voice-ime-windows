@@ -224,7 +224,8 @@ public partial class App : System.Windows.Application
         _overlay?.Show(OverlayPhase.Recording);
         if (MicrophoneDevices.ListNames().Count == 0)
         {
-            _coordinator.ReportStartResult(false, new RecordingError(RecordingErrorReason.NoDevice));
+            _coordinator.ReportStartResult(
+                generation, false, new RecordingError(RecordingErrorReason.NoDevice));
             return;
         }
 
@@ -240,7 +241,8 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            _coordinator.ReportStartResult(false, RecordingError.FromException(ex), ex);
+            _coordinator.ReportStartResult(
+                generation, false, RecordingError.FromException(ex), ex);
         }
     }
 

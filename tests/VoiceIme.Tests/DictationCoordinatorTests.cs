@@ -183,6 +183,7 @@ public sealed class DictationCoordinatorTests
         coordinator.OnHotkeyDown();
 
         coordinator.ReportStartResult(
+            coordinator.Generation,
             false,
             new RecordingError(RecordingErrorReason.MicDenied));
 
@@ -201,7 +202,7 @@ public sealed class DictationCoordinatorTests
         coordinator.ErrorRaised += (_, _) => raised++;
         coordinator.OnHotkeyDown();
 
-        coordinator.ReportStartResult(true);
+        coordinator.ReportStartResult(coordinator.Generation, true);
 
         Assert.Equal(DictationState.Recording, coordinator.State);
         Assert.Equal(0, raised);
@@ -212,7 +213,8 @@ public sealed class DictationCoordinatorTests
     {
         var (coordinator, clock) = Create();
         coordinator.OnHotkeyDown();
-        coordinator.ReportStartResult(false, new RecordingError(RecordingErrorReason.Unknown));
+        coordinator.ReportStartResult(
+            coordinator.Generation, false, new RecordingError(RecordingErrorReason.Unknown));
 
         clock.AdvanceMs(100);
         Assert.Equal(HotkeyCommand.None, coordinator.OnHotkeyDown());
@@ -220,6 +222,31 @@ public sealed class DictationCoordinatorTests
         coordinator.AcknowledgeError();
         clock.AdvanceMs(100);
         Assert.Equal(HotkeyCommand.StartRecording, coordinator.OnHotkeyDown());
+    }
+
+    [Fact]
+    public void Generation_StaleStartFailure_DoesNotTouchNewSession()
+    {
+        var (coordinator, clock) = Create();
+        coordinator.OnHotkeyDown();
+        var staleGeneration = coordinator.Generation;
+
+        // A cancel drains the first session, then a new session starts live.
+        coordinator.CancelCurrentOperation();
+        clock.AdvanceMs(100);
+        var raised = 0;
+        coordinator.ErrorRaised += (_, _) => raised++;
+        Assert.Equal(HotkeyCommand.StartRecording, coordinator.OnHotkeyDown());
+        Assert.Equal(staleGeneration + 1, coordinator.Generation);
+
+        // The late start-failure from session N arrives during session N+1:
+        // ignored, and the new session keeps recording.
+        coordinator.ReportStartResult(
+            staleGeneration, false, new RecordingError(RecordingErrorReason.MicDenied));
+
+        Assert.Equal(0, raised);
+        Assert.Equal(DictationState.Recording, coordinator.State);
+        Assert.Equal(staleGeneration + 1, coordinator.Generation);
     }
 
     [Fact]

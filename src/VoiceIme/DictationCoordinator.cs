@@ -260,13 +260,15 @@ public sealed class DictationCoordinator : IDisposable
     }
 
     /// <summary>
-    /// Reconciles the optimistic start: success keeps recording; failure
-    /// rolls back to Error and surfaces the typed error. Stale results
-    /// (cancelled meanwhile) are ignored.
+    /// Reconciles the optimistic start for one session: success keeps
+    /// recording; failure rolls back to Error and surfaces the typed error.
+    /// Results carrying a stale generation (a late start-failure from
+    /// session N arriving during live session N+1) are ignored, like every
+    /// other stage gate on this machine.
     /// </summary>
-    public void ReportStartResult(bool started, IDictationError? error = null, Exception? cause = null)
+    public void ReportStartResult(long generation, bool started, IDictationError? error = null, Exception? cause = null)
     {
-        if (State != DictationState.Recording)
+        if (generation != Generation || State != DictationState.Recording)
         {
             return;
         }
@@ -389,6 +391,10 @@ public sealed class DictationCoordinator : IDisposable
         _pressStartUtc = now;
         _locked = locked;
         Generation++;
+        // Disposing the prior session CTS is benign, not a cancel: a token
+        // already handed out keeps whatever cancellation state it had, and
+        // every async continuation re-checks Generation before touching
+        // state, so a late continuation of the old session stays silent.
         _sessionCts?.Dispose();
         _sessionCts = new CancellationTokenSource();
         State = DictationState.Recording;
