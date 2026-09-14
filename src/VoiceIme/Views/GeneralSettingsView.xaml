@@ -1,0 +1,118 @@
+<UserControl x:Class="VoiceIme.Views.GeneralSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+    <!-- General section (Handy GeneralSettings port): hotkey capture chip,
+         activation mode dropdown, and the Sound group. All brushes and the
+         card/row/toggle styles resolve from Theme/HandyTheme.xaml via
+         DynamicResource. Hosted by MainWindow through
+         RegisterSectionView(MainSection.General, view). -->
+    <StackPanel>
+        <TextBlock Text="GENERAL" Style="{DynamicResource HandyGroupHeader}" Margin="0,0,0,8" />
+        <Border Style="{DynamicResource HandySettingCard}">
+            <StackPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Border x:Name="HotkeyChip" CornerRadius="6" BorderThickness="1"
+                                Padding="8,4" Cursor="Hand" VerticalAlignment="Center"
+                                Focusable="True"
+                                ToolTip="Click to record a new hotkey"
+                                BorderBrush="{DynamicResource HandyCardBorder}"
+                                Background="{DynamicResource HandySecondaryBackground}"
+                                MouseLeftButtonUp="HotkeyChip_Click"
+                                KeyDown="HotkeyChip_KeyDown">
+                            <TextBlock x:Name="HotkeyText" FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource HandyText}"
+                                       Text="Ctrl+Shift+Space" />
+                        </Border>
+                        <Button x:Name="ResetHotkeyButton" Content="Reset" Margin="6,0,0,0"
+                                Padding="12,4" VerticalAlignment="Center"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                ToolTip="Restore Ctrl+Shift+Space"
+                                Click="ResetHotkeyButton_Click" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Dictation hotkey" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Works from any app. Click the chip, press keys, release to save. Click elsewhere to cancel."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock x:Name="HotkeyError" FontSize="12" TextWrapping="Wrap"
+                           Margin="0,4,0,0" Visibility="Collapsed"
+                           Foreground="{DynamicResource HandyError}" />
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <ComboBox x:Name="ActivationBox" DockPanel.Dock="Right" MinWidth="160"
+                              VerticalAlignment="Center" HorizontalAlignment="Right"
+                              FontSize="13" Foreground="{DynamicResource HandyText}"
+                              FontFamily="{DynamicResource HandyFontFamily}"
+                              SelectionChanged="ActivationBox_SelectionChanged" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Activation mode" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Saved now; recording still toggles until the new engine lands."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <TextBlock Text="SOUND" Style="{DynamicResource HandyGroupHeader}" />
+        <Border Style="{DynamicResource HandySettingCard}">
+            <StackPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <ComboBox x:Name="MicBox" MinWidth="200"
+                                  VerticalAlignment="Center"
+                                  FontSize="13" Foreground="{DynamicResource HandyText}"
+                                  FontFamily="{DynamicResource HandyFontFamily}"
+                                  SelectionChanged="MicBox_SelectionChanged" />
+                        <Button x:Name="RefreshMicButton" Content="&#x21BB;" Margin="6,0,0,0"
+                                Padding="12,4" VerticalAlignment="Center"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                ToolTip="Refresh microphone list"
+                                Click="RefreshMicButton_Click" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Microphone" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Falls back to the system input when unset."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <CheckBox x:Name="MuteCheck" DockPanel.Dock="Right"
+                              VerticalAlignment="Center" HorizontalAlignment="Right"
+                              Style="{DynamicResource HandyToggle}"
+                              Click="MuteCheck_Click" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Mute while recording" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Mutes system output so the mic does not pick it up. Stored for now."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <Button x:Name="TestSoundButton" DockPanel.Dock="Right" Content="Test"
+                            Padding="12,4" VerticalAlignment="Center" HorizontalAlignment="Right"
+                            Style="{DynamicResource HandySecondaryButton}"
+                            Click="TestSoundButton_Click" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Speaker test" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock x:Name="SoundStatus"
+                                   Text="Plays a 1-second tone through the default output."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

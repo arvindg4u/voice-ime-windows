@@ -23,6 +23,17 @@ public sealed class SettingsStore
     public string CustomPrompt { get; set; } = "";
     public int KeyCursor { get; set; }
 
+    // Task 3 (Handy UI port): General settings screen fields. Defaults apply
+    // to old settings files that predate these fields (no schemaVersion bump —
+    // Task 9 owns versioning). All writes validate-then-commit: invalid values
+    // coerce to defaults with a warning, never throw.
+    public string Hotkey { get; set; } = HotkeyChord.DefaultChord;
+    public string ActivationMode { get; set; } = ActivationModes.Toggle;
+
+    /// <summary>Device name, or "" for the system default.</summary>
+    public string Microphone { get; set; } = "";
+    public bool MuteWhileRecording { get; set; }
+
     public static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "VoiceIme", "settings.json");
@@ -41,6 +52,11 @@ public sealed class SettingsStore
                 Model = Get(root, "model", "gemini-2.5-flash"),
                 CustomPrompt = Get(root, "customPrompt", ""),
                 KeyCursor = root.TryGetProperty("keyCursor", out var c) && c.TryGetInt32(out var ci) ? ci : 0,
+                Hotkey = CoerceHotkey(Get(root, "hotkey", HotkeyChord.DefaultChord)),
+                ActivationMode = CoerceActivationMode(Get(root, "activationMode", ActivationModes.Toggle)),
+                Microphone = Get(root, "microphone", ""),
+                MuteWhileRecording = root.TryGetProperty("muteWhileRecording", out var m)
+                    && m.ValueKind == JsonValueKind.True,
             };
             if (root.TryGetProperty("apiKeysProtected", out var p))
             {
@@ -61,6 +77,9 @@ public sealed class SettingsStore
 
     public void Save()
     {
+        Hotkey = CoerceHotkey(Hotkey);
+        ActivationMode = CoerceActivationMode(ActivationMode);
+        Microphone ??= "";
         var dir = Path.GetDirectoryName(SettingsPath)!;
         Directory.CreateDirectory(dir);
         var joined = string.Join('\n', ApiKeys);
@@ -73,9 +92,40 @@ public sealed class SettingsStore
             model = Model,
             customPrompt = CustomPrompt,
             keyCursor = KeyCursor,
+            hotkey = Hotkey,
+            activationMode = ActivationMode,
+            microphone = Microphone,
+            muteWhileRecording = MuteWhileRecording,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
+    }
+
+    /// <summary>
+    /// Invalid chords fall back to the default (warns via trace; never
+    /// throws — Handy settings pattern). Empty/whitespace is invalid too.
+    /// </summary>
+    internal static string CoerceHotkey(string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)
+            && HotkeyChord.TryParse(value, out _, out _))
+        {
+            return value.Trim();
+        }
+
+        System.Diagnostics.Trace.WriteLine($"[Settings] Invalid hotkey {value ?? "<null>"} — using default {HotkeyChord.DefaultChord}.");
+        return HotkeyChord.DefaultChord;
+    }
+
+    internal static string CoerceActivationMode(string? value)
+    {
+        if (ActivationModes.IsValid(value))
+        {
+            return value!;
+        }
+
+        System.Diagnostics.Trace.WriteLine($"[Settings] Invalid activationMode {value ?? "<null>"} — using default {ActivationModes.Toggle}.");
+        return ActivationModes.Toggle;
     }
 
     private static string Get(JsonElement root, string name, string fallback) =>

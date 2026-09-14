@@ -34,7 +34,7 @@ public partial class App : System.Windows.Application
 
         _tray = new NotifyIcon
         {
-            Text = "Voice IME — Ctrl+Shift+Space to dictate",
+            Text = $"Voice IME — {_settings.Hotkey} to dictate",
             Visible = true,
             Icon = System.Drawing.SystemIcons.Information,
             ContextMenuStrip = BuildMenu(),
@@ -42,13 +42,13 @@ public partial class App : System.Windows.Application
         _tray.DoubleClick += (_, _) => ToggleAsync();
 
         _hotkeyWindow = new HotkeyWindow(HotkeyId, () => ToggleAsync());
-        _hotkeyWindow.Register(0x0004 /* MOD_SHIFT */ | NativeInput.ModControl, 0x20 /* SPACE */);
+        RegisterStoredHotkey();
     }
 
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Dictate (Ctrl+Shift+Space)", null, (_, _) => ToggleAsync());
+        menu.Items.Add($"Dictate ({_settings.Hotkey})", null, (_, _) => ToggleAsync());
         menu.Items.Add("Settings…", null, (_, _) => OpenSettings());
         menu.Items.Add("History…", null, (_, _) => OpenHistory());
         menu.Items.Add(new ToolStripSeparator());
@@ -124,11 +124,42 @@ public partial class App : System.Windows.Application
     // MainWindow singleton: Task 4 deletes SettingsWindow and Task 5 deletes
     // HistoryWindow; the legacy files stay in the build (compiling but
     // unreferenced) until then. Tasks 4/5 wire the matching sections here.
+    //
+    // Task 3: the stored hotkey owns the live global registration, not a
+    // hardcoded chord — App registers whatever SettingsStore holds (invalid
+    // values already coerce to the default on load), and hands the General
+    // screen a LiveHotkeyRegistrar so capture suspends the real hotkey.
+    private void RegisterStoredHotkey()
+    {
+        if (_hotkeyWindow is null)
+        {
+            return;
+        }
+
+        if (!HotkeyChord.TryParse(_settings.Hotkey, out var modifiers, out var vk))
+        {
+            _settings.Hotkey = HotkeyChord.DefaultChord;
+            HotkeyChord.TryParse(_settings.Hotkey, out modifiers, out vk);
+        }
+
+        _hotkeyWindow.Register(modifiers, vk);
+    }
+
+    private void AttachLiveHotkey(MainWindow window)
+    {
+        if (window.SectionView(MainSection.General) is Views.GeneralSettingsView general
+            && _hotkeyWindow is not null)
+        {
+            general.HotkeyRegistrar = new LiveHotkeyRegistrar(_hotkeyWindow);
+        }
+    }
+
     private MainWindow? _mainWindow;
 
     internal void OpenSettings()
     {
         _mainWindow ??= new MainWindow();
+        AttachLiveHotkey(_mainWindow);
         _mainWindow.NavigateTo(MainSection.General);
         ShowMainWindow();
     }

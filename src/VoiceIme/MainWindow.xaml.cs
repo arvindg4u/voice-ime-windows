@@ -41,10 +41,26 @@ public partial class MainWindow : Window
     public MainSection CurrentSection { get; private set; } = MainSection.General;
 
     public MainWindow()
+        : this(() => new Views.GeneralSettingsView())
+    {
+    }
+
+    /// <summary>
+    /// Test seam: callers inject the General section view (headless tests
+    /// pass no factory or a non-UI placeholder); null disables the default
+    /// General registration so construction never requires a window station.
+    /// </summary>
+    internal MainWindow(Func<object?>? createGeneralView)
     {
         InitializeComponent();
         VersionText.Text = "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
         BuildNav();
+        var view = createGeneralView?.Invoke();
+        if (view is not null)
+        {
+            RegisterSectionView(MainSection.General, view);
+        }
+
         NavigateTo(MainSection.General);
     }
 
@@ -83,6 +99,13 @@ public partial class MainWindow : Window
             NavigateTo(section);
         }
     }
+
+    /// <summary>
+    /// The view registered for a section, if any. App wiring uses it to hand
+    /// the General screen its live-hotkey channel (Task 3).
+    /// </summary>
+    internal object? SectionView(MainSection section) =>
+        _sectionViews.TryGetValue(section, out var view) ? view : null;
 
     /// <summary>Mirrors the tray state into the footer. Thread-safe.</summary>
     public void SetStatus(string text)

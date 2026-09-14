@@ -20,9 +20,25 @@ public sealed class HotkeyWindow : NativeWindow, IDisposable
         CreateHandle(new CreateParams { Caption = "VoiceImeHotkey" });
     }
 
-    public void Register(uint modifiers, uint vk)
+    /// <summary>
+    /// (Re-)registers the global hotkey. Returns false when Windows rejects
+    /// the chord (e.g. another app already owns it) — callers roll back to
+    /// the previous binding instead of leaving dictation unreachable.
+    /// </summary>
+    public bool Register(uint modifiers, uint vk)
     {
         _registered = NativeInput.TryRegisterHotKey(Handle, _id, modifiers, vk);
+        return _registered;
+    }
+
+    /// <summary>
+    /// Suspends the live hotkey (e.g. while the settings screen captures a
+    /// replacement chord) so it neither fires nor swallows keystrokes.
+    /// </summary>
+    public void Unregister()
+    {
+        NativeInput.TryUnregisterHotKey(Handle, _id);
+        _registered = false;
     }
 
     protected override void WndProc(ref Message m)
@@ -34,7 +50,7 @@ public sealed class HotkeyWindow : NativeWindow, IDisposable
 
     public void Dispose()
     {
-        if (_registered) NativeInput.TryUnregisterHotKey(Handle, _id);
+        Unregister();
         DestroyHandle();
     }
 }
