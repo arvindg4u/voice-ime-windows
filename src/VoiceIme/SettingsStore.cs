@@ -35,8 +35,17 @@ public sealed class SettingsStore
     public bool MuteWhileRecording { get; set; }
 
     public static string SettingsPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        SettingsPathOverride?.Invoke()
+        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "VoiceIme", "settings.json");
+
+    /// <summary>
+    /// Test hook: when set, <see cref="SettingsPath"/> returns this delegate's
+    /// value instead of the %AppData% path, so tests redirect Load/Save to temp
+    /// files and never touch the developer's real settings. Production never
+    /// sets it; tests must reset it to null in a finally block.
+    /// </summary>
+    internal static Func<string>? SettingsPathOverride { get; set; }
 
     public static SettingsStore Load()
     {

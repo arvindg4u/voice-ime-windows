@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using Xunit;
 
 namespace VoiceIme.Tests;
@@ -14,27 +12,30 @@ public sealed class SettingsStoreTests
     {
         if (!OperatingSystem.IsWindows()) return; // DPAPI is Windows-only
 
-        var store = SettingsStore.Load();
-        var originalKeys = store.ApiKeys.ToList();
-        var originalModel = store.Model;
+        // Temp-file redirect (see below): the real %AppData% file is never
+        // touched, so a crash mid-test cannot destroy developer settings.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
         try
         {
-            store.ApiKeys = ["synthetic-key-1", "synthetic-key-2"];
-            store.Model = "synthetic-model";
+            var store = new SettingsStore
+            {
+                ApiKeys = ["synthetic-key-1", "synthetic-key-2"],
+                Model = "synthetic-model",
+            };
             store.Save();
 
             var reloaded = SettingsStore.Load();
             Assert.Equal(["synthetic-key-1", "synthetic-key-2"], reloaded.ApiKeys);
             Assert.Equal("synthetic-model", reloaded.Model);
 
-            var raw = File.ReadAllText(SettingsStore.SettingsPath);
+            var raw = File.ReadAllText(path);
             Assert.DoesNotContain("synthetic-key-1", raw);
         }
         finally
         {
-            store.ApiKeys = originalKeys;
-            store.Model = originalModel;
-            store.Save();
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
         }
     }
 
@@ -43,18 +44,20 @@ public sealed class SettingsStoreTests
     {
         if (!OperatingSystem.IsWindows()) return; // Save uses DPAPI
 
-        var store = SettingsStore.Load();
-        var originalHotkey = store.Hotkey;
-        var originalMode = store.ActivationMode;
-        var originalMic = store.Microphone;
-        var originalMute = store.MuteWhileRecording;
+        // Redirect to a temp file: the real %AppData% file is never touched,
+        // so parallel xUnit classes cannot interleave on it.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
         try
         {
             // Arrange
-            store.Hotkey = "Alt+F4";
-            store.ActivationMode = ActivationModes.PushToTalk;
-            store.Microphone = "Synthetic Mic";
-            store.MuteWhileRecording = true;
+            var store = new SettingsStore
+            {
+                Hotkey = "Alt+F4",
+                ActivationMode = ActivationModes.PushToTalk,
+                Microphone = "Synthetic Mic",
+                MuteWhileRecording = true,
+            };
             store.Save();
 
             // Act
@@ -66,16 +69,13 @@ public sealed class SettingsStoreTests
             Assert.Equal("Synthetic Mic", reloaded.Microphone);
             Assert.True(reloaded.MuteWhileRecording);
 
-            var raw = File.ReadAllText(SettingsStore.SettingsPath);
+            var raw = File.ReadAllText(path);
             Assert.Contains("Alt+F4", raw);
         }
         finally
         {
-            store.Hotkey = originalHotkey;
-            store.ActivationMode = originalMode;
-            store.Microphone = originalMic;
-            store.MuteWhileRecording = originalMute;
-            store.Save();
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
         }
     }
 
@@ -84,9 +84,10 @@ public sealed class SettingsStoreTests
     {
         // Arrange: pre-Task-3 file — no hotkey/activationMode/microphone keys,
         // and no apiKeysProtected so no DPAPI call happens (any-OS safe).
-        var path = SettingsStore.SettingsPath;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var backup = File.Exists(path) ? File.ReadAllText(path) : null;
+        // Written to a temp file via the path seam; the developer's real
+        // settings are never touched.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
         try
         {
             File.WriteAllText(path,
@@ -103,14 +104,8 @@ public sealed class SettingsStoreTests
         }
         finally
         {
-            if (backup is null)
-            {
-                File.Delete(path);
-            }
-            else
-            {
-                File.WriteAllText(path, backup);
-            }
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
         }
     }
 

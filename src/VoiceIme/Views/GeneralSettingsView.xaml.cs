@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Media;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -447,16 +448,23 @@ public partial class GeneralSettingsView : UserControl
 
     private void TestSoundButton_Click(object sender, RoutedEventArgs e)
     {
-        try
+        // PlaySync on a background thread: the stream/player stay alive for
+        // the whole playback (a fire-and-forget Play() would be cut off when
+        // the usings dispose), and the UI thread never blocks.
+        SoundStatus.Text = "Playing test tone…";
+        _ = Task.Run(() =>
         {
-            using var player = new SoundPlayer(new MemoryStream(AudioRecorder.TestToneWav()));
-            player.Play();
-            SoundStatus.Text = "Playing test tone…";
-        }
-        catch (Exception ex)
-        {
-            SoundStatus.Text = $"Speaker test failed: {ex.Message}";
-        }
+            try
+            {
+                using var stream = new MemoryStream(AudioRecorder.TestToneWav());
+                using var player = new SoundPlayer(stream);
+                player.PlaySync();
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() => SoundStatus.Text = $"Speaker test failed: {ex.Message}");
+            }
+        });
     }
 
     private bool TrySaveSettings(out string? error)
