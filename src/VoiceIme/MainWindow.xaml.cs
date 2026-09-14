@@ -167,9 +167,9 @@ public partial class MainWindow : Window
             var button = new System.Windows.Controls.Button
             {
                 Style = (Style)FindResource("HandyNavButton"),
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = System.Windows.HorizontalAlignment.Stretch,
             };
-            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
             row.Children.Add(new TextBlock
             {
                 Text = MainNav.IconFor(captured),

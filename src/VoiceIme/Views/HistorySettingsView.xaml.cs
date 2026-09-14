@@ -46,7 +46,7 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     {
         ArgumentNullException.ThrowIfNull(store);
         _store = store;
-        _copyText = copyText ?? (static text => Clipboard.SetText(text));
+        _copyText = copyText ?? new Action<string>(static text => System.Windows.Clipboard.SetText(text));
         _openDataFolder = openDataFolder ?? OpenDataFolderInExplorer;
         InitializeComponent();
         Refresh();

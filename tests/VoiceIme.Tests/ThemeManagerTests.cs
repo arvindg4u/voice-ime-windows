@@ -13,7 +13,7 @@ public sealed class ThemeManagerTests
         // The xUnit runner hosts no WPF Application, so Application.Current
         // is null and ApplyTheme must no-op instead of throwing. This locks
         // the headless-safety contract the unit tests rely on.
-        Assert.Null(Application.Current);
+        Assert.Null(System.Windows.Application.Current);
 
         var exception = Record.Exception(() => ThemeManager.ApplyTheme(HandyTheme.Dark));
 

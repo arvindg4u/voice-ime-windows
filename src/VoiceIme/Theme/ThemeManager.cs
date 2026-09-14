@@ -109,7 +109,7 @@ public static class ThemeManager
     /// </summary>
     public static void ApplyTheme(HandyTheme theme)
     {
-        var app = Application.Current;
+        var app = System.Windows.Application.Current;
         if (app is null)
         {
             return;
