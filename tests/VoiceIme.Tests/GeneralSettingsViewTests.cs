@@ -74,7 +74,7 @@ public sealed class GeneralSettingsViewTests
             Assert.Equal("Alt+F4", store.Hotkey);
             Assert.Equal("Alt+F4", view.HotkeyLabel);
             Assert.False(view.IsHotkeyErrorVisible);
-            Assert.Equal(new[] { "Alt+F4" }, saved.ToArray());
+            Assert.True(saved.SequenceEqual(["Alt+F4"]));
         }, saver: s => saved.Add(s.Hotkey));
     }
 

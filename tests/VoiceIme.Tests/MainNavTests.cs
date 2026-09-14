@@ -27,7 +27,7 @@ public sealed class MainNavTests
             MainSection.About,
         };
 
-        Assert.Equal(expected, MainNav.Ordered.ToArray());
+        Assert.True(MainNav.Ordered.SequenceEqual(expected));
     }
 
     [Theory]
