@@ -14,7 +14,7 @@ public sealed class LlmClientTests
     private const string Model = "gemini-2.5-flash";
 
     private static string OkPayload(string text) =>
-        $$"""{"candidates":[{"content":{"parts":[{"text":"{{text}}"}]}}]}""";
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"" + text + "\"}]}}]}";
 
     private static MockHttpMessageHandler HandlerForKey(string key, HttpStatusCode code, string body)
     {
