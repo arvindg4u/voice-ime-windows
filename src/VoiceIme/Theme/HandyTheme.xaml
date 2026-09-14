@@ -1,0 +1,211 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Handy design tokens (Task 1 of the Handy UI port).
+        Light values are the defaults below; ThemeManager.ApplyTheme swaps the
+        brush objects at runtime so every DynamicResource consumer updates live.
+        Brush keys are the cross-task contract — do not rename them.
+        Palette source: handy-reference/src/styles/theme.css + plan §Task 1.
+    -->
+    <SolidColorBrush x:Key="HandyText" Color="#0F0F0F" />
+    <SolidColorBrush x:Key="HandyBackground" Color="#FBFBFB" />
+    <SolidColorBrush x:Key="HandyAccent" Color="#DA5893" />
+    <SolidColorBrush x:Key="HandyLogoPrimary" Color="#FAA2CA" />
+    <SolidColorBrush x:Key="HandyError" Color="#DC2626" />
+    <SolidColorBrush x:Key="HandyWarning" Color="#D97706" />
+    <SolidColorBrush x:Key="HandyMidGray" Color="#808080" />
+    <!-- 1px #808080 @20% border (plan): 20% alpha = 0x33. -->
+    <SolidColorBrush x:Key="HandyCardBorder" Color="#33808080" />
+    <!-- Card surface: white card on the light background; white @5% over the
+         dark background (≈#373634) on dark. Reference uses bg-white/5 cards. -->
+    <SolidColorBrush x:Key="HandyCardBackground" Color="#FFFFFF" />
+    <!-- Extra (non-contract) helpers used by the shared styles below. -->
+    <SolidColorBrush x:Key="HandySecondaryBackground" Color="#33808080" />
+    <FontFamily x:Key="HandyFontFamily">Segoe UI</FontFamily>
+
+    <!-- Primary: white text on accent, 8px radius, 80% opacity on hover. -->
+    <Style x:Key="HandyPrimaryButton" TargetType="Button">
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Background" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Root"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="8"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.8" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.65" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Secondary: gray-tinted fill, accent border on hover. -->
+    <Style x:Key="HandySecondaryButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="Background" Value="{DynamicResource HandySecondaryBackground}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Root"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource HandyAccent}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.7" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Danger: same shape as primary, error fill. -->
+    <Style x:Key="HandyDangerButton" TargetType="Button" BasedOn="{StaticResource HandyPrimaryButton}">
+        <Setter Property="Background" Value="{DynamicResource HandyError}" />
+    </Style>
+
+    <!-- Settings card: 8px radius, 1px border. -->
+    <Style x:Key="HandySettingCard" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource HandyCardBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HandyCardBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+
+    <!--
+        Settings row: horizontal label + control, min height 48.
+        Usage: <DockPanel Style="{DynamicResource HandySettingRow}">
+                   <TextBlock Text="Label" VerticalAlignment="Center" />
+                   <CheckBox Style="{DynamicResource HandyToggle}" ... />
+               </DockPanel>
+        (Last child fills remaining width.)
+    -->
+    <Style x:Key="HandySettingRow" TargetType="DockPanel">
+        <Setter Property="MinHeight" Value="48" />
+        <Setter Property="Margin" Value="0,2" />
+    </Style>
+
+    <!--
+        Group header: 12px, gray. Consumers uppercase the text (WPF
+        TextBlock has no letter-spacing/text-transform property).
+        Wide letter-tracking from the Handy web UI is intentionally not
+        implemented: WPF TextBlock exposes no tracking property.
+    -->
+    <Style x:Key="HandyGroupHeader" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyMidGray}" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="Margin" Value="0,16,0,8" />
+    </Style>
+
+    <Style x:Key="HandyTextBox" TargetType="TextBox">
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CaretBrush" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HandyCardBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Root"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource HandyAccent}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Toggle: 44x24 pill, accent track when on. Usage: CheckBox with optional label content. -->
+    <Style x:Key="HandyToggle" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal">
+                        <Border x:Name="Track" Width="44" Height="24" CornerRadius="12"
+                                Background="{DynamicResource HandyMidGray}" Opacity="0.4">
+                            <Ellipse x:Name="Knob" Width="18" Height="18" Fill="White"
+                                     HorizontalAlignment="Left" Margin="3,0,0,0" />
+                        </Border>
+                        <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource HandyAccent}" />
+                            <Setter TargetName="Track" Property="Opacity" Value="1" />
+                            <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Knob" Property="Margin" Value="0,0,3,0" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HandySlider" TargetType="Slider">
+        <Setter Property="Foreground" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="MinHeight" Value="24" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="IsSnapToTickEnabled" Value="False" />
+        <Setter Property="TickPlacement" Value="None" />
+    </Style>
+
+</ResourceDictionary>

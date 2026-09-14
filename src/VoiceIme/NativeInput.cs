@@ -124,3 +124,14 @@ public static class NativeInput
     // Keep MOD_CONTROL visible to callers without exposing raw constants.
     public static uint ModControl => MOD_CONTROL;
 }
+
+/// <summary>
+/// DllImports HotkeyWindow needs that do not belong on <see cref="VoiceIme.NativeInput"/>
+/// (which is about hotkeys and paste). Registered window messages back the
+/// Task 9 single-instance broadcast.
+/// </summary>
+internal static class NativeMethods
+{
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    internal static extern uint RegisterWindowMessage(string lpString);
+}
