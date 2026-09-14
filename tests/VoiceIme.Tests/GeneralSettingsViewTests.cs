@@ -1,9 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.ExceptionServices;
-using System.Threading;
-using System.Windows.Threading;
 using VoiceIme.Views;
 using Xunit;
 
@@ -16,6 +13,7 @@ namespace VoiceIme.Tests;
 /// runs on windows-latest CI. The view is built with a no-op saver so tests
 /// never touch disk or DPAPI.
 /// </summary>
+[Collection("WpfSta")]
 public sealed class GeneralSettingsViewTests
 {
     [Fact]
@@ -216,53 +214,23 @@ public sealed class GeneralSettingsViewTests
         Action<GeneralSettingsView> body,
         Action<SettingsStore>? saver = null)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        StaTestHelper.TryRunOnSta(() =>
         {
-            try
-            {
-                var view = new GeneralSettingsView(
-                    store, registrar, () => microphones, saver ?? (_ => { }));
-                body(view);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
+            var view = new GeneralSettingsView(
+                store, registrar, () => microphones, saver ?? (_ => { }));
+            body(view);
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
     }
 
     private static void RunOnStaWindow(Action<MainWindow> body, Func<MainWindow> create)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        MainWindow? window = null;
+        StaTestHelper.TryRunOnSta(() =>
         {
-            MainWindow? window = null;
             try
             {
                 window = create();
                 body(window);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
             }
             finally
             {
@@ -270,41 +238,11 @@ public sealed class GeneralSettingsViewTests
                 {
                     window?.Close();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    failure ??= ex;
+                    // Close failures surface via the body exception path.
                 }
-
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-    }
-
-    private static bool IsHeadlessFailure(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            var name = current.GetType().Name;
-            if (name.Contains("InvalidOperationException", StringComparison.Ordinal)
-                || name.Contains("COMException", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

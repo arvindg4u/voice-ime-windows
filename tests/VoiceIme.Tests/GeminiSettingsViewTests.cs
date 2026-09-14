@@ -1,10 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.ExceptionServices;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Threading;
 using VoiceIme.Views;
 using Xunit;
 
@@ -18,6 +15,7 @@ namespace VoiceIme.Tests;
 /// runs on windows-latest CI. Views are built with a no-op saver and fake
 /// pipeline so tests never touch disk, DPAPI, or the network.
 /// </summary>
+[Collection("WpfSta")]
 public sealed class GeminiSettingsViewTests
 {
     [Fact]
@@ -182,56 +180,26 @@ public sealed class GeminiSettingsViewTests
         Action<SettingsStore>? saver = null,
         Func<byte[], IReadOnlyList<string>, string, string, string, Task<(string Transcript, int UsedIndex)>>? transcribeAsync = null)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        StaTestHelper.TryRunOnSta(() =>
         {
-            try
-            {
-                var view = new GeminiSettingsView(
-                    store,
-                    saver ?? (_ => { }),
-                    recordTone: () => Array.Empty<byte>(),
-                    transcribeAsync: transcribeAsync ?? ((_, _, _, _, _) => Task.FromResult(("", 0))));
-                body(view);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
+            var view = new GeminiSettingsView(
+                store,
+                saver ?? (_ => { }),
+                recordTone: () => Array.Empty<byte>(),
+                transcribeAsync: transcribeAsync ?? ((_, _, _, _, _) => Task.FromResult(("", 0))));
+            body(view);
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
     }
 
     private static void RunOnStaWindow(Action<MainWindow> body, Func<MainWindow> create)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        MainWindow? window = null;
+        StaTestHelper.TryRunOnSta(() =>
         {
-            MainWindow? window = null;
             try
             {
                 window = create();
                 body(window);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
             }
             finally
             {
@@ -239,41 +207,11 @@ public sealed class GeminiSettingsViewTests
                 {
                     window?.Close();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    failure ??= ex;
+                    // Close failures surface via the body exception path.
                 }
-
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-    }
-
-    private static bool IsHeadlessFailure(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            var name = current.GetType().Name;
-            if (name.Contains("InvalidOperationException", StringComparison.Ordinal)
-                || name.Contains("COMException", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

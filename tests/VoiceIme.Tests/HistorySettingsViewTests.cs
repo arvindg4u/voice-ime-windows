@@ -1,9 +1,6 @@
 using System;
 using System.IO;
 using System.Linq;
-using System.Runtime.ExceptionServices;
-using System.Threading;
-using System.Windows.Threading;
 using VoiceIme.Views;
 using Xunit;
 
@@ -18,6 +15,7 @@ namespace VoiceIme.Tests;
 /// with a no-op clipboard and folder opener so tests never touch
 /// %AppData%, the real clipboard, or Explorer.
 /// </summary>
+[Collection("WpfSta")]
 public sealed class HistorySettingsViewTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
@@ -195,44 +193,19 @@ public sealed class HistorySettingsViewTests : IDisposable
     [Fact]
     public void BindStore_SwitchesToLiveStore()
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        StaTestHelper.TryRunOnSta(() =>
         {
-            try
-            {
-                var live = new ClipboardStore(PathFor("live.json"));
-                live.Add("spoken later");
-                var view = new HistorySettingsView(
-                    new ClipboardStore(PathFor("stale.json")),
-                    copyText: _ => { },
-                    openDataFolder: () => { });
+            var live = new ClipboardStore(PathFor("live.json"));
+            live.Add("spoken later");
+            var view = new HistorySettingsView(
+                new ClipboardStore(PathFor("stale.json")),
+                copyText: _ => { },
+                openDataFolder: () => { });
 
-                view.BindStore(live);
+            view.BindStore(live);
 
-                Assert.Equal("spoken later", Assert.Single(view.Rows).Body);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
+            Assert.Equal("spoken later", Assert.Single(view.Rows).Body);
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
     }
 
     [Fact]
@@ -282,57 +255,27 @@ public sealed class HistorySettingsViewTests : IDisposable
         Action<HistorySettingsView> body,
         Action<string>? onCopy = null)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        StaTestHelper.TryRunOnSta(() =>
         {
-            try
-            {
-                var store = new ClipboardStore(storePath);
-                seed(store);
-                var view = new HistorySettingsView(
-                    store,
-                    copyText: onCopy ?? (_ => { }),
-                    openDataFolder: () => { });
-                body(view);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-            finally
-            {
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
+            var store = new ClipboardStore(storePath);
+            seed(store);
+            var view = new HistorySettingsView(
+                store,
+                copyText: onCopy ?? (_ => { }),
+                openDataFolder: () => { });
+            body(view);
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
     }
 
     private static void RunOnStaWindow(Action<MainWindow> body, Func<MainWindow> create)
     {
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        MainWindow? window = null;
+        StaTestHelper.TryRunOnSta(() =>
         {
-            MainWindow? window = null;
             try
             {
                 window = create();
                 body(window);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
             }
             finally
             {
@@ -340,41 +283,11 @@ public sealed class HistorySettingsViewTests : IDisposable
                 {
                     window?.Close();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    failure ??= ex;
+                    // Close failures surface via the body exception path.
                 }
-
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-    }
-
-    private static bool IsHeadlessFailure(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            var name = current.GetType().Name;
-            if (name.Contains("InvalidOperationException", StringComparison.Ordinal)
-                || name.Contains("COMException", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

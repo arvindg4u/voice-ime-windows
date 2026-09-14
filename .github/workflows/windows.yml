@@ -16,7 +16,8 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Run unit tests
-        run: dotnet test VoiceIme.Windows.sln -c Release
+        timeout-minutes: 10
+        run: dotnet test VoiceIme.Windows.sln -c Release --blame-hang --blame-hang-timeout 5m
 
       - name: Publish single-file EXE
         run: >

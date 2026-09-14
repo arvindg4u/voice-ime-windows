@@ -5,6 +5,7 @@ using Xunit;
 namespace VoiceIme.Tests;
 
 /// <summary>DPAPI round-trip — Windows only; skipped elsewhere (CI is windows-latest).</summary>
+[Collection("SettingsFile")]
 public sealed class SettingsStoreTests
 {
     [Fact]
@@ -59,6 +60,14 @@ public sealed class SettingsStoreTests
                 MuteWhileRecording = true,
             };
             store.Save();
+
+            // Self-diagnosing: capture the raw file BEFORE Load so a future
+            // failure shows whether Save coerced the value (missing here) or
+            // Load read a different file (present here, absent on reload).
+            var rawAfterSave = File.ReadAllText(path);
+            Assert.True(
+                rawAfterSave.Contains("Alt+F4", StringComparison.Ordinal),
+                "Save did not persist Alt+F4. Raw file was: " + rawAfterSave);
 
             // Act
             var reloaded = SettingsStore.Load();

@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
@@ -12,6 +11,7 @@ namespace VoiceIme.Tests;
 /// OverlayWindow STA tests follow the MainWindowTests pattern (vacuous on
 /// headless runners, full assertions on windows-latest CI).
 /// </summary>
+[Collection("WpfSta")]
 public sealed class OverlayStateTests
 {
     [Theory]
@@ -110,8 +110,7 @@ public sealed class OverlayStateTests
     private static bool TryRunOnSta(Action<OverlayWindow> body)
     {
         OverlayWindow? window = null;
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        return StaTestHelper.TryRunOnSta(() =>
         {
             try
             {
@@ -121,53 +120,17 @@ public sealed class OverlayStateTests
                 };
                 body(window);
             }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
             finally
             {
                 try
                 {
                     window?.Close();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    failure ??= ex;
+                    // Close failures surface via the body exception path.
                 }
-
-                Dispatcher.CurrentDispatcher.InvokeShutdown();
             }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null && IsHeadlessFailure(failure))
-        {
-            return false;
-        }
-
-        if (failure is not null)
-        {
-            ExceptionDispatchInfo.Capture(failure).Throw();
-        }
-
-        return true;
-    }
-
-    private static bool IsHeadlessFailure(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            var name = current.GetType().Name;
-            if (name.Contains("InvalidOperationException", StringComparison.Ordinal)
-                || name.Contains("COMException", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
