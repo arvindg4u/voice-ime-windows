@@ -50,6 +50,29 @@ public sealed class AppWiringTests : IDisposable
     }
 
     [Fact]
+    public void CreateMainWindow_BindsLiveSettingsToAdvanced()
+    {
+        TryRunOnSta(() =>
+        {
+            var settings = new SettingsStore();
+            var clips = new ClipboardStore(PathFor("adv.json"));
+            var window = App.CreateMainWindow(
+                settings, clips, new NullHotkeyRegistrar(), () => Array.Empty<string>());
+            try
+            {
+                Assert.Same(
+                    settings,
+                    Assert.IsType<AdvancedSettingsView>(
+                        window.SectionView(MainSection.Advanced)).BoundSettings);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void CreateMainWindow_BindsLiveClipsToHistory()
     {
         TryRunOnSta(() =>
@@ -125,6 +148,8 @@ public sealed class AppWiringTests : IDisposable
             {
                 settings.Hotkey = "Alt+F4";
                 settings.Model = "test-model";
+                settings.StartHidden = true;
+                settings.HistoryLimit = 42;
                 clips.Add("dictated while hidden");
 
                 App.RefreshSectionViews(window, settings, clips);
@@ -135,9 +160,13 @@ public sealed class AppWiringTests : IDisposable
                     window.SectionView(MainSection.Gemini));
                 var history = Assert.IsType<HistorySettingsView>(
                     window.SectionView(MainSection.History));
+                var advanced = Assert.IsType<AdvancedSettingsView>(
+                    window.SectionView(MainSection.Advanced));
                 Assert.Equal("Alt+F4", general.HotkeyLabel);
                 Assert.Equal("test-model", gemini.ModelText);
                 Assert.Equal("dictated while hidden", Assert.Single(history.Rows).Body);
+                Assert.True(advanced.StartHiddenChecked == true);
+                Assert.Equal("42", advanced.HistoryLimitText);
             }
             finally
             {

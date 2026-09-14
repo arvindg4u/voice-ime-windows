@@ -317,4 +317,128 @@ public sealed class SettingsStoreTests
         Assert.Equal(ActivationModes.Toggle, store.ActivationMode);
         Assert.Equal(warningsAfterFirst, store.LoadWarnings.Count);
     }
+
+    [Theory]
+    [InlineData(PasteMethods.CtrlV)]
+    [InlineData(PasteMethods.ShiftInsert)]
+    [InlineData(PasteMethods.CtrlShiftV)]
+    public void CoercePasteMethod_Valid_KeepsValue(string value)
+    {
+        Assert.Equal(value, SettingsStore.CoercePasteMethod(value));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("ctrl_v")]
+    [InlineData("hold")]
+    public void CoercePasteMethod_Invalid_FallsBackToCtrlV(string? value)
+    {
+        Assert.Equal(PasteMethods.CtrlV, SettingsStore.CoercePasteMethod(value));
+    }
+
+    [Theory]
+    [InlineData(-1000, 10)]
+    [InlineData(9, 10)]
+    [InlineData(10, 10)]
+    [InlineData(100, 100)]
+    [InlineData(500, 500)]
+    [InlineData(501, 500)]
+    [InlineData(int.MaxValue, 500)]
+    public void ClampHistoryLimit_ClampsTo10To500(int value, int expected)
+    {
+        Assert.Equal(expected, SettingsStore.ClampHistoryLimit(value));
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsAdvancedSettings()
+    {
+        if (!OperatingSystem.IsWindows()) return; // Save uses DPAPI
+
+        // Temp-file redirect: the real %AppData% file is never touched.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var store = new SettingsStore
+            {
+                StartHidden = true,
+                Autostart = true,
+                ShowTrayIcon = false,
+                ShowOverlay = false,
+                PasteMethod = PasteMethods.ShiftInsert,
+                HistoryLimit = 250,
+            };
+            store.Save();
+
+            var reloaded = SettingsStore.Load();
+
+            Assert.True(reloaded.StartHidden);
+            Assert.True(reloaded.Autostart);
+            Assert.False(reloaded.ShowTrayIcon);
+            Assert.False(reloaded.ShowOverlay);
+            Assert.Equal(PasteMethods.ShiftInsert, reloaded.PasteMethod);
+            Assert.Equal(250, reloaded.HistoryLimit);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_OldFileWithoutAdvancedFields_UsesDefaults()
+    {
+        // Pre-Task-1 file — none of the six new keys, and no
+        // apiKeysProtected so no DPAPI call happens (any-OS safe).
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.False(loaded.StartHidden);
+            Assert.False(loaded.Autostart);
+            Assert.True(loaded.ShowTrayIcon);
+            Assert.True(loaded.ShowOverlay);
+            Assert.Equal(PasteMethods.CtrlV, loaded.PasteMethod);
+            Assert.Equal(SettingsStore.DefaultHistoryLimit, loaded.HistoryLimit);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_BadPasteMethod_CoercesToDefaultWithWarning()
+    {
+        // Handy's snake_case value is not in our Windows subset — coerced,
+        // never thrown. The out-of-range limit clamps silently (10–500).
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"pasteMethod":"ctrl_v","historyLimit":9999}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(PasteMethods.CtrlV, loaded.PasteMethod);
+            Assert.Equal(500, loaded.HistoryLimit);
+            Assert.True(loaded.HasLoadWarnings);
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("pasteMethod"));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
 }

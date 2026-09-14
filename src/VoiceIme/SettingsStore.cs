@@ -47,6 +47,21 @@ public sealed class SettingsStore
     public string Microphone { get; set; } = "";
     public bool MuteWhileRecording { get; set; }
 
+    // Task 1 (Handy parity gaps): Advanced screen fields. Same contract —
+    // additive, field-level defaults, coerce-don't-throw, no version bump.
+    public bool StartHidden { get; set; }
+    public bool Autostart { get; set; }
+    public bool ShowTrayIcon { get; set; } = true;
+    public bool ShowOverlay { get; set; } = true;
+    public string PasteMethod { get; set; } = PasteMethods.CtrlV;
+
+    public const int MinHistoryLimit = 10;
+    public const int MaxHistoryLimit = 500;
+    public const int DefaultHistoryLimit = 100;
+
+    /// <summary>Transcript-history cap (drives ClipboardStore). Clamped 10–500.</summary>
+    public int HistoryLimit { get; set; } = DefaultHistoryLimit;
+
     /// <summary>
     /// Non-fatal problems from the last <see cref="Load"/> (corrupt file,
     /// bad enum string, undecryptable keys, unknown newer version). Empty on
@@ -121,6 +136,8 @@ public sealed class SettingsStore
         Hotkey = CoerceHotkey(Hotkey, Warn);
         ActivationMode = CoerceActivationMode(ActivationMode, Warn);
         Microphone ??= "";
+        PasteMethod = CoercePasteMethod(PasteMethod, Warn);
+        HistoryLimit = ClampHistoryLimit(HistoryLimit);
         if (KeyCursor < 0)
         {
             KeyCursor = 0;
@@ -134,6 +151,8 @@ public sealed class SettingsStore
         Hotkey = CoerceHotkey(Hotkey);
         ActivationMode = CoerceActivationMode(ActivationMode);
         Microphone ??= "";
+        PasteMethod = CoercePasteMethod(PasteMethod);
+        HistoryLimit = ClampHistoryLimit(HistoryLimit);
         SchemaVersion = CurrentSchemaVersion;
         var dir = Path.GetDirectoryName(SettingsPath)!;
         Directory.CreateDirectory(dir);
@@ -152,6 +171,12 @@ public sealed class SettingsStore
             activationMode = ActivationMode,
             microphone = Microphone,
             muteWhileRecording = MuteWhileRecording,
+            startHidden = StartHidden,
+            autostart = Autostart,
+            showTrayIcon = ShowTrayIcon,
+            showOverlay = ShowOverlay,
+            pasteMethod = PasteMethod,
+            historyLimit = HistoryLimit,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
@@ -183,6 +208,41 @@ public sealed class SettingsStore
 
         return HotkeyChord.DefaultChord;
     }
+
+    /// <summary>
+    /// Bad paste-method strings fall back to Ctrl+V (warns via the same
+    /// coerce-don't-throw contract as hotkey/activation mode). An unknown
+    /// selection must never break load or crash delivery.
+    /// </summary>
+    internal static string CoercePasteMethod(string? value) => CoercePasteMethod(value, null);
+
+    internal static string CoercePasteMethod(string? value, Action<string>? onWarning)
+    {
+        if (PasteMethods.IsValid(value))
+        {
+            return value!;
+        }
+
+        var message = $"Invalid pasteMethod {value ?? "<null>"} — using default {PasteMethods.CtrlV}.";
+        if (onWarning is not null)
+        {
+            onWarning(message);
+        }
+        else
+        {
+            System.Diagnostics.Trace.WriteLine("[Settings] " + message);
+        }
+
+        return PasteMethods.CtrlV;
+    }
+
+    /// <summary>
+    /// History cap clamp: values below 10 pin to 10, above 500 pin to 500.
+    /// Pure range check — no warnings (a clamped limit is still a valid
+    /// limit, unlike an unknown enum string).
+    /// </summary>
+    internal static int ClampHistoryLimit(int value) =>
+        Math.Clamp(value, MinHistoryLimit, MaxHistoryLimit);
 
     internal static string CoerceActivationMode(string? value) => CoerceActivationMode(value, null);
 
@@ -223,6 +283,12 @@ public sealed class SettingsStore
         ActivationMode = CoerceActivationMode(GetString(root, "activationMode", ActivationModes.Toggle), Warn);
         Microphone = GetString(root, "microphone", Microphone);
         MuteWhileRecording = GetBool(root, "muteWhileRecording", MuteWhileRecording);
+        StartHidden = GetBool(root, "startHidden", StartHidden);
+        Autostart = GetBool(root, "autostart", Autostart);
+        ShowTrayIcon = GetBool(root, "showTrayIcon", ShowTrayIcon);
+        ShowOverlay = GetBool(root, "showOverlay", ShowOverlay);
+        PasteMethod = CoercePasteMethod(GetString(root, "pasteMethod", PasteMethods.CtrlV), Warn);
+        HistoryLimit = ClampHistoryLimit(GetInt(root, "historyLimit", HistoryLimit));
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
         // already read above.
@@ -301,6 +367,42 @@ public sealed class SettingsStore
         if (mute.HasValue)
         {
             MuteWhileRecording = mute.Value;
+        }
+
+        var startHidden = SalvageBool(raw, "startHidden");
+        if (startHidden.HasValue)
+        {
+            StartHidden = startHidden.Value;
+        }
+
+        var autostart = SalvageBool(raw, "autostart");
+        if (autostart.HasValue)
+        {
+            Autostart = autostart.Value;
+        }
+
+        var showTray = SalvageBool(raw, "showTrayIcon");
+        if (showTray.HasValue)
+        {
+            ShowTrayIcon = showTray.Value;
+        }
+
+        var showOverlay = SalvageBool(raw, "showOverlay");
+        if (showOverlay.HasValue)
+        {
+            ShowOverlay = showOverlay.Value;
+        }
+
+        var pasteMethod = SalvageString(raw, "pasteMethod");
+        if (pasteMethod is not null)
+        {
+            PasteMethod = CoercePasteMethod(pasteMethod, Warn);
+        }
+
+        var historyLimit = SalvageInt(raw, "historyLimit");
+        if (historyLimit.HasValue)
+        {
+            HistoryLimit = ClampHistoryLimit(historyLimit.Value);
         }
 
         var version = SalvageInt(raw, "schemaVersion");

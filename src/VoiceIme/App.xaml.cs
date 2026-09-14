@@ -581,7 +581,8 @@ public partial class App : System.Windows.Application
         return new(
             () => new Views.GeneralSettingsView(settings, registrar, listMicrophones),
             () => new Views.GeminiSettingsView(settings),
-            () => new Views.HistorySettingsView(clips));
+            () => new Views.HistorySettingsView(clips),
+            () => new Views.AdvancedSettingsView(settings));
     }
 
     /// <summary>
@@ -646,6 +647,12 @@ public partial class App : System.Windows.Application
             is Views.GeminiSettingsView gemini)
         {
             gemini.ReloadFromSettings();
+        }
+
+        if (window.SectionView(MainSection.Advanced)
+            is Views.AdvancedSettingsView advanced)
+        {
+            advanced.ReloadFromSettings();
         }
     }
 
