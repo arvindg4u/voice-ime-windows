@@ -1,0 +1,96 @@
+<UserControl x:Class="VoiceIme.Views.HistorySettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+    <!-- History section (Handy history port): header row with data-folder
+         shortcut, newest-first transcript list (medium timestamp, selectable
+         italic transcript, copy/pin/retry/delete icon row), and a footer with
+         the re-dictate hint plus clear-unpinned. Failed transcriptions show
+         as retryable rows — audio is never persisted (privacy), so Retry
+         surfaces a re-dictate hint instead of re-sending. All brushes and
+         styles resolve from Theme/HandyTheme.xaml via DynamicResource.
+         Hosted by MainWindow through
+         RegisterSectionView(MainSection.History, view). -->
+    <StackPanel>
+        <DockPanel LastChildFill="False">
+            <TextBlock DockPanel.Dock="Left" Text="HISTORY" VerticalAlignment="Center"
+                       Margin="0" Style="{DynamicResource HandyGroupHeader}" />
+            <Button x:Name="OpenFolderButton" DockPanel.Dock="Right" Content="Open folder"
+                    Padding="12,4" VerticalAlignment="Center"
+                    Style="{DynamicResource HandySecondaryButton}"
+                    ToolTip="Open the Voice IME data folder in Explorer"
+                    Click="OpenFolderButton_Click" />
+        </DockPanel>
+
+        <ListBox x:Name="EntriesList"
+                 Background="Transparent" BorderThickness="0"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="0,0,0,8" />
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border Style="{DynamicResource HandySettingCard}" ToolTip="{Binding CompactLabel}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding TimeLabel}" FontSize="14"
+                                       FontWeight="Medium"
+                                       Foreground="{DynamicResource HandyText}" />
+                            <TextBox Text="{Binding Body, Mode=OneWay}" Margin="0,4,0,0"
+                                     IsReadOnly="True" BorderThickness="0"
+                                     Background="Transparent"
+                                     FontStyle="Italic" FontSize="14"
+                                     TextWrapping="Wrap"
+                                     Foreground="{DynamicResource HandyText}"
+                                     Visibility="{Binding BodyVisibility}" />
+                            <TextBlock Text="{Binding Error, Mode=OneWay}" Margin="0,4,0,0"
+                                       FontStyle="Italic" FontSize="14"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource HandyError}"
+                                       Visibility="{Binding ErrorVisibility}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="{Binding CopyGlyph}" Padding="12,4" Margin="0,0,8,0"
+                                        Style="{DynamicResource HandySecondaryButton}"
+                                        Tag="{Binding Id}" ToolTip="Copy to clipboard"
+                                        Visibility="{Binding CopyVisibility}"
+                                        Click="CopyButton_Click" />
+                                <Button Content="{Binding PinGlyph}" Padding="12,4" Margin="0,0,8,0"
+                                        Style="{DynamicResource HandySecondaryButton}"
+                                        Tag="{Binding Id}" ToolTip="{Binding PinTip}"
+                                        Click="PinButton_Click" />
+                                <Button Content="Retry" Padding="12,4" Margin="0,0,8,0"
+                                        Style="{DynamicResource HandySecondaryButton}"
+                                        Tag="{Binding Id}"
+                                        ToolTip="Audio isn't kept — re-dictate instead"
+                                        Visibility="{Binding RetryVisibility}"
+                                        Click="RetryButton_Click" />
+                                <Button Content="Delete" Padding="12,4"
+                                        Style="{DynamicResource HandyDangerButton}"
+                                        Tag="{Binding Id}"
+                                        Click="DeleteButton_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBlock x:Name="EmptyText" FontSize="13" TextWrapping="Wrap"
+                   Foreground="{DynamicResource HandyMidGray}"
+                   Text="No history yet — dictate something first."
+                   Visibility="Collapsed" />
+
+        <DockPanel Margin="0,8,0,0">
+            <Button x:Name="ClearButton" DockPanel.Dock="Right" Content="Clear unpinned"
+                    Padding="12,4" VerticalAlignment="Center"
+                    Style="{DynamicResource HandySecondaryButton}"
+                    Click="ClearButton_Click" />
+            <TextBlock x:Name="HintText" VerticalAlignment="Center" Margin="0,0,12,0"
+                       FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource HandyMidGray}" />
+        </DockPanel>
+    </StackPanel>
+</UserControl>

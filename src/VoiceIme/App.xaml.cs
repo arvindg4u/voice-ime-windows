@@ -112,6 +112,17 @@ public partial class App : System.Windows.Application
         }
         catch (TranscribeException ex)
         {
+            // Failed rows persist as retryable empty-text entries (privacy:
+            // audio is never persisted). The live History view picks up the
+            // error text when it exists; otherwise the row still clears with
+            // the store and shows a generic message when the view opens.
+            var failed = _clips.Add(string.Empty);
+            if (_mainWindow?.SectionView(MainSection.History)
+                is Views.HistorySettingsView history)
+            {
+                history.AttachError(failed.Id, ex.Message);
+            }
+
             SetTray($"Voice IME — {ex.Message}", balloon: true);
         }
         catch (Exception ex)
@@ -123,8 +134,9 @@ public partial class App : System.Windows.Application
 
     // MainWindow singleton: Task 4 deleted SettingsWindow (its Base
     // URL/keys/model/prompt fields live in Views.GeminiSettingsView now);
-    // Task 5 deletes HistoryWindow, which stays in the build (compiling but
-    // unreferenced) until then.
+    // Task 5 deleted HistoryWindow (history lives in
+    // Views.HistorySettingsView, transit errors re-dictated — audio is
+    // never persisted).
     //
     // Task 3: the stored hotkey owns the live global registration, not a
     // hardcoded chord — App registers whatever SettingsStore holds (invalid
@@ -159,8 +171,7 @@ public partial class App : System.Windows.Application
 
     /// <summary>
     /// Opens the settings shell on the Gemini section (the rehomed legacy
-    /// SettingsWindow content). History keeps its own entry point until
-    /// Task 5 rehomes HistoryWindow.
+    /// SettingsWindow content).
     /// </summary>
     internal void OpenSettings()
     {
@@ -173,6 +184,12 @@ public partial class App : System.Windows.Application
     internal void OpenHistory()
     {
         _mainWindow ??= new MainWindow();
+        if (_mainWindow.SectionView(MainSection.History)
+            is Views.HistorySettingsView history)
+        {
+            history.BindStore(_clips);
+        }
+
         _mainWindow.NavigateTo(MainSection.History);
         ShowMainWindow();
     }
