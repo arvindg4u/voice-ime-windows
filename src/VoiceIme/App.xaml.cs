@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
+using System.Windows.Threading;
 using VoiceIme.Theme;
 
 namespace VoiceIme;
@@ -11,7 +12,10 @@ namespace VoiceIme;
 /// <summary>
 /// Tray-first application: a NotifyIcon owns the lifecycle, the settings window
 /// opens on demand. Global hotkey (Ctrl+Shift+Space) toggles recording from any app.
-/// All dictation state mirrors Android's IDLE → RECORDING → UPLOADING → ERROR machine.
+/// Thin glue over <see cref="DictationCoordinator"/>: App executes effects
+/// (capture, upload, overlay, tray, paste) while the coordinator owns
+/// IDLE → RECORDING → UPLOADING → ERROR. No dictation logic lives here —
+/// hotkey edges go in, commands come out, async stages report back.
 /// </summary>
 public partial class App : System.Windows.Application
 {
@@ -23,18 +27,40 @@ public partial class App : System.Windows.Application
     private readonly LlmClient _llm = new();
     private SettingsStore _settings = SettingsStore.Load();
     private readonly ClipboardStore _clips = new();
-    private CancellationTokenSource? _recordCts;
-    private bool _recording;
-    private bool _transcribing;
+    private readonly DictationCoordinator _coordinator = new();
     private OverlayWindow? _overlay;
+    private DispatcherTimer? _releaseTimer;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
         _settings = SettingsStore.Load();
-        _recorder.AutoStopped += () => _ = StopAndTranscribeAsync();
+        _recorder.AutoStopped += HandleAutoStop;
         _recorder.LevelChanged += level => _overlay?.SetLevel(level);
+        _coordinator.ErrorRaised += HandleError;
+        _coordinator.OperationCancelled += () =>
+        {
+            _overlay?.Hide();
+            RefreshMenu();
+            SetTray("Voice IME — ready");
+        };
+
+        // Resolves deferred hold-mode releases once the 50 ms grace elapses
+        // (the coordinator returns StopRecording for a real hold). Idle cost
+        // is one cheap HasPendingRelease check per tick.
+        _releaseTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(DictationCoordinator.CancelPollIntervalMs),
+        };
+        _releaseTimer.Tick += (_, _) =>
+        {
+            if (_coordinator.Tick() == HotkeyCommand.StopRecording)
+            {
+                _ = StopAndTranscribeAsync();
+            }
+        };
+        _releaseTimer.Start();
 
         _notifier = new Notifier((title, body, severity) =>
             _tray?.ShowBalloonTip(3000, title, body, ToToolTipIcon(severity)));
@@ -45,9 +71,9 @@ public partial class App : System.Windows.Application
             Icon = System.Drawing.SystemIcons.Information,
             ContextMenuStrip = BuildMenu(),
         };
-        _tray.DoubleClick += (_, _) => ToggleAsync();
+        _tray.DoubleClick += (_, _) => HandleToggleInput();
 
-        _hotkeyWindow = new HotkeyWindow(HotkeyId, () => ToggleAsync());
+        _hotkeyWindow = new HotkeyWindow(HotkeyId, HandleHotkeyPress);
         RegisterStoredHotkey();
     }
 
@@ -62,7 +88,7 @@ public partial class App : System.Windows.Application
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        var busy = _recording || _transcribing;
+        var busy = _coordinator.State is DictationState.Recording or DictationState.Uploading;
         var version = GetType().Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
         var hasTranscript = _clips.Entries.Any(e => !string.IsNullOrEmpty(e.Text));
         foreach (var item in TrayMenu.Items(busy, "v" + version, hasTranscript))
@@ -136,104 +162,177 @@ public partial class App : System.Windows.Application
         _ => ToolTipIcon.Info,
     };
 
-    private void ToggleAsync() => _ = _recording ? StopAndTranscribeAsync() : StartRecordingAsync();
+    /// <summary>
+    /// Global hotkey delivers press edges only (WM_HOTKEY has no key-up), so
+    /// it feeds <see cref="DictationCoordinator.OnHotkeyDown"/>. In toggle
+    /// mode (the default) press starts / press stops; in hold modes the first
+    /// press starts and stopping uses the overlay/tray Cancel affordances (or
+    /// a future key hook feeding OnHotkeyUp) — cancel always drains to Idle.
+    /// </summary>
+    private void HandleHotkeyPress()
+    {
+        _coordinator.ActivationMode = _settings.ActivationMode;
+        switch (_coordinator.OnHotkeyDown())
+        {
+            case HotkeyCommand.StartRecording:
+                _ = StartRecordingAsync();
+                break;
+            case HotkeyCommand.StopRecording:
+                _ = StopAndTranscribeAsync();
+                break;
+        }
+    }
 
+    /// <summary>
+    /// Tray double-click has no release edge either, so it uses the
+    /// never-debounced toggle entry: a quick stop right after a start works.
+    /// </summary>
+    private void HandleToggleInput()
+    {
+        _coordinator.ActivationMode = _settings.ActivationMode;
+        switch (_coordinator.OnToggleInput())
+        {
+            case HotkeyCommand.StartRecording:
+                _ = StartRecordingAsync();
+                break;
+            case HotkeyCommand.StopRecording:
+                _ = StopAndTranscribeAsync();
+                break;
+        }
+    }
+
+    private void HandleAutoStop()
+    {
+        if (_coordinator.OnAutoStop() == HotkeyCommand.StopRecording)
+        {
+            _ = StopAndTranscribeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Optimistic start: UI flips to recording immediately; a start failure
+    /// rolls back through the coordinator, which surfaces the typed error.
+    /// </summary>
     private async Task StartRecordingAsync()
     {
-        if (_recording) return;
-        _recording = true;
-        _recordCts = new CancellationTokenSource();
+        if (_coordinator.State != DictationState.Recording) return;
+        var generation = _coordinator.Generation;
+        var token = _coordinator.SessionToken;
         RefreshMenu();
         SetTray("Voice IME — recording… tap hotkey to stop");
         EnsureOverlay();
         _overlay?.Show(OverlayPhase.Recording);
         if (MicrophoneDevices.ListNames().Count == 0)
         {
-            HandleError(new RecordingError(RecordingErrorReason.NoDevice));
+            _coordinator.ReportStartResult(false, new RecordingError(RecordingErrorReason.NoDevice));
             return;
         }
 
         try
         {
-            await Task.Run(() => _recorder.Start(), _recordCts.Token);
+            await Task.Run(() => _recorder.Start(), token);
         }
         catch (OperationCanceledException)
         {
-            // User cancelled before capture started — CancelRecording already
-            // reverted to idle; surfacing an error here would stick one.
+            // User cancelled before capture started — CancelCurrentOperation
+            // already drained to idle; reconciling here would stick UI.
+            _coordinator.NotifyUploadCancelled(generation);
         }
         catch (Exception ex)
         {
-            HandleError(RecordingError.FromException(ex), ex);
+            _coordinator.ReportStartResult(false, RecordingError.FromException(ex), ex);
         }
     }
 
     private async Task StopAndTranscribeAsync()
     {
-        if (!_recording) return;
-        _recording = false;
-        _transcribing = true;
+        if (_coordinator.State != DictationState.Uploading) return;
+        var generation = _coordinator.Generation;
+        var token = _coordinator.SessionToken;
         RefreshMenu();
         SetTray("Voice IME — transcribing…");
         _overlay?.Show(OverlayPhase.Uploading);
         byte[] wav;
         try
         {
-            wav = await _recorder.StopAsync();
+            wav = await _recorder.StopAsync(token);
+            token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
         }
         catch (Exception ex)
         {
-            HandleError(new RecordingError(RecordingErrorReason.Unknown), ex);
+            _coordinator.ReportUploadFailed(
+                generation, new RecordingError(RecordingErrorReason.Unknown), ex);
             return;
         }
 
-        if (wav.Length <= 44)
+        // Stage gate: a cancel that landed after StopAsync must not upload.
+        if (token.IsCancellationRequested)
         {
-            _transcribing = false;
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        // Empty audio (or a late stop from an ended session) discards — but a
+        // cancelled-while-stopping session must not touch status text.
+        if (_coordinator.ReportAudioCaptured(wav) == AudioCaptureOutcome.Discarded)
+        {
+            if (token.IsCancellationRequested)
+            {
+                _coordinator.NotifyUploadCancelled(generation);
+                return;
+            }
+
             RefreshMenu();
             _overlay?.Hide();
             SetTray("Voice IME — no audio captured");
             return;
         }
 
-        await TranscribeAndPasteAsync(wav);
+        await TranscribeAndPasteAsync(wav, generation, token);
     }
 
     /// <summary>
     /// Upload/transcribe/paste phase of <see cref="StopAndTranscribeAsync"/>.
-    /// All failures funnel through <see cref="HandleError"/>; success clears
-    /// to idle with the overlay hidden.
+    /// The session token threads into <see cref="LlmClient.TranscribeAsync"/>
+    /// (Task 7 review follow-up), so cancel aborts the in-flight upload;
+    /// per-stage gates plus the coordinator generation check mean a late
+    /// completion can neither paste nor clobber Idle. All failures funnel
+    /// through the coordinator, which raises the typed error once.
     /// </summary>
-    private async Task TranscribeAndPasteAsync(byte[] wav)
+    private async Task TranscribeAndPasteAsync(
+        byte[] wav, long generation, CancellationToken token)
     {
+        string transcript;
+        int usedIndex;
         try
         {
-            var (transcript, usedIndex) = await _llm.TranscribeAsync(
+            (transcript, usedIndex) = await _llm.TranscribeAsync(
                 wav, _settings.ApiKeys, _settings.BaseUrl, _settings.Model,
-                _settings.KeyCursor, _settings.CustomPrompt);
-            _settings.KeyCursor = (_settings.ApiKeys.Count == 0)
-                ? 0
-                : (usedIndex + 1) % _settings.ApiKeys.Count;
-            _settings.Save();
-            _clips.Add(transcript);
-            RefreshMenu();
-            try
-            {
-                NativeInput.PasteIntoFocusedWindow(transcript);
-            }
-            catch (Exception pasteEx)
-            {
-                HandleError(new PasteError(), pasteEx);
-                return;
-            }
-
-            _transcribing = false;
-            RefreshMenu();
-            _overlay?.Hide();
-            SetTray("Voice IME — pasted ✓");
+                _settings.KeyCursor, _settings.CustomPrompt, ct: token);
+            token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
         }
         catch (TranscribeException ex)
         {
+            // Stale first: a late failure after cancel must stay silent —
+            // no history row, no view touch, no error re-surface.
+            if (token.IsCancellationRequested
+                || generation != _coordinator.Generation
+                || _coordinator.State != DictationState.Uploading)
+            {
+                _coordinator.NotifyUploadCancelled(generation);
+                return;
+            }
+
             // Failed rows persist as retryable empty-text entries (privacy:
             // audio is never persisted). The live History view picks up the
             // error text when it exists; otherwise the row still clears with
@@ -245,20 +344,65 @@ public partial class App : System.Windows.Application
                 history.AttachError(failed.Id, ex.Message);
             }
 
-            HandleError(TranscriptionError.From(ex), ex);
+            _coordinator.ReportUploadFailed(generation, TranscriptionError.From(ex), ex);
+            return;
         }
         catch (Exception ex)
         {
-            HandleError(new TranscriptionError("Something went wrong"), ex);
+            // Same staleness first: a late unexpected throw must not surface.
+            if (token.IsCancellationRequested
+                || generation != _coordinator.Generation
+                || _coordinator.State != DictationState.Uploading)
+            {
+                _coordinator.NotifyUploadCancelled(generation);
+                return;
+            }
+
+            _coordinator.ReportUploadFailed(
+                generation, new TranscriptionError("Something went wrong"), ex);
+            return;
+        }
+
+        // Stage gate: a cancel that landed after transcribe must not paste.
+        if (token.IsCancellationRequested)
+        {
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        _settings.KeyCursor = (_settings.ApiKeys.Count == 0)
+            ? 0
+            : (usedIndex + 1) % _settings.ApiKeys.Count;
+        _settings.Save();
+        _clips.Add(transcript);
+        RefreshMenu();
+        try
+        {
+            NativeInput.PasteIntoFocusedWindow(transcript);
+        }
+        catch (Exception pasteEx)
+        {
+            _coordinator.ReportUploadFailed(generation, new PasteError(), pasteEx);
+            return;
+        }
+
+        // Commit last: false means a newer session (or cancel) owns the
+        // machine — never touch status on a stale completion.
+        if (_coordinator.ReportUploadSucceeded(generation))
+        {
+            RefreshMenu();
+            _overlay?.Hide();
+            SetTray("Voice IME — pasted ✓");
         }
     }
 
     /// <summary>
     /// Single handler for all typed pipeline errors (Task 7 → Task 8
-    /// contract): atomic revert to idle (flags, menu, overlay) FIRST, then
-    /// one balloon via <see cref="Notifier"/> plus the inline overlay error.
-    /// Never leaves the overlay stuck and never raises UI from a MessageBox —
-    /// all user-visible output routes through the Notifier. Inner exceptions
+    /// contract): the coordinator already reverted atomically before raising,
+    /// so this only shows — one balloon via <see cref="Notifier"/> plus the
+    /// inline overlay error — then acknowledges back to Idle. Never leaves
+    /// the overlay stuck and never raises UI from a MessageBox — all
+    /// user-visible output routes through the Notifier. Inner exceptions
     /// are discarded: <see cref="IDictationError.UserMessage"/> strings are
     /// pre-approved safe, and raw exception text (which may embed key material
     /// or paths) must never reach the surface.
@@ -266,8 +410,6 @@ public partial class App : System.Windows.Application
     private void HandleError(IDictationError error, Exception? cause = null)
     {
         ArgumentNullException.ThrowIfNull(error);
-        _recording = false;
-        _transcribing = false;
         RefreshMenu();
         _overlay?.ShowError(error.UserMessage);
         _notifier.Notify(
@@ -280,13 +422,15 @@ public partial class App : System.Windows.Application
         {
             System.Diagnostics.Trace.WriteLine($"[Dictation] {error.GetType().Name}: {cause.GetType().Name}.");
         }
+
+        _coordinator.AcknowledgeError();
     }
 
     /// <summary>
     /// Lazily creates the recording overlay (a Window needs a window station,
     /// so construction is deferred until first dictation). Cancel discards
-    /// the in-flight capture and hides the overlay — Task 8 owns the full
-    /// coordinator with its CancelCurrentOperation entry point.
+    /// the in-flight capture and hides the overlay via the coordinator's
+    /// <c>CancelCurrentOperation</c> entry point.
     /// </summary>
     private void EnsureOverlay()
     {
@@ -299,29 +443,16 @@ public partial class App : System.Windows.Application
         _overlay.CancelRequested += CancelRecording;
     }
 
+    /// <summary>
+    /// Single cancel entry point in App: the coordinator aborts the session
+    /// token (in-flight stop/transcribe drains through it) and drains to
+    /// Idle, the recorder drops capture, and the OperationCancelled handler
+    /// hides the overlay and returns the tray to ready.
+    /// </summary>
     private void CancelRecording()
     {
-        if (!_recording && !_transcribing)
-        {
-            _overlay?.Hide();
-            return;
-        }
-
-        _recording = false;
-        _transcribing = false;
-        try
-        {
-            _recordCts?.Cancel();
-        }
-        catch
-        {
-            // Best effort: capture stops below regardless.
-        }
-
+        _coordinator.CancelCurrentOperation();
         _recorder.Cancel();
-        _overlay?.Hide();
-        RefreshMenu();
-        SetTray("Voice IME — ready");
     }
 
     // MainWindow singleton: Task 4 deleted SettingsWindow (its Base
@@ -425,6 +556,8 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _releaseTimer?.Stop();
+        _coordinator.Dispose();
         _recorder.Cancel();
         _overlay?.Close();
         _hotkeyWindow?.Dispose();
