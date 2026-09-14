@@ -9,6 +9,7 @@ public enum TrayMenuAction
     VersionHeader,
     Cancel,
     CopyLastTranscript,
+    History,
     Settings,
     Quit,
     Separator,
@@ -25,13 +26,14 @@ public sealed record TrayMenuItem(TrayMenuAction Action, string Label, bool Enab
 
 /// <summary>
 /// Handy tray order. Idle: version (disabled) | Copy Last Transcript |
-/// Settings… (Ctrl+,) | Quit. Busy (recording/uploading): version | Cancel |
-/// Copy Last Transcript | Settings… | Quit.
+/// History… | Settings… (Ctrl+,) | Quit. Busy (recording/uploading):
+/// version | Cancel | Copy Last Transcript | History… | Settings… | Quit.
 /// </summary>
 public static class TrayMenu
 {
     public const string SettingsLabel = "Settings… (Ctrl+,)";
     public const string CopyLabel = "Copy Last Transcript";
+    public const string HistoryLabel = "History…";
     public const string CancelLabel = "Cancel";
     public const string QuitLabel = "Quit";
 
@@ -41,13 +43,14 @@ public static class TrayMenu
     {
         var header = new TrayMenuItem(TrayMenuAction.VersionHeader, VersionLabel(version), Enabled: false);
         var copy = new TrayMenuItem(TrayMenuAction.CopyLastTranscript, CopyLabel, hasTranscript);
+        var history = new TrayMenuItem(TrayMenuAction.History, HistoryLabel, Enabled: true);
         var settings = new TrayMenuItem(TrayMenuAction.Settings, SettingsLabel, Enabled: true);
         var quit = new TrayMenuItem(TrayMenuAction.Quit, QuitLabel, Enabled: true);
         var sep = new TrayMenuItem(TrayMenuAction.Separator, "-", Enabled: false);
         return busy
             ? [header, sep,
                 new TrayMenuItem(TrayMenuAction.Cancel, CancelLabel, Enabled: true), sep,
-                copy, sep, settings, sep, quit]
-            : [header, sep, copy, sep, settings, sep, quit];
+                copy, sep, history, sep, settings, sep, quit]
+            : [header, sep, copy, sep, history, sep, settings, sep, quit];
     }
 }

@@ -58,6 +58,12 @@ public partial class HistorySettingsView : UserControl
     /// <summary>Test seam: footer hint text.</summary>
     internal string HintMessage => HintText.Text;
 
+    /// <summary>
+    /// The shared <see cref="ClipboardStore"/> this view renders — the F2
+    /// shared-instance wiring asserts the app's live store lands here.
+    /// </summary>
+    internal ClipboardStore BoundStore => _store;
+
     /// <summary>Test seam: whether the empty-history message is shown.</summary>
     internal bool IsEmptyVisible => EmptyText.Visibility == Visibility.Visible;
 

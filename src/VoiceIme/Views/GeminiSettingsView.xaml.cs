@@ -25,6 +25,12 @@ public partial class GeminiSettingsView : UserControl
 
     private readonly SettingsStore _settings;
     private readonly Action<SettingsStore> _saver;
+
+    /// <summary>
+    /// The shared <see cref="SettingsStore"/> this view edits — the F1
+    /// shared-instance wiring asserts the app's live store lands here.
+    /// </summary>
+    internal SettingsStore BoundSettings => _settings;
     private readonly Func<byte[]> _recordTone;
     private readonly Func<byte[], IReadOnlyList<string>, string, string, string, Task<(string Transcript, int UsedIndex)>> _transcribeAsync;
 
@@ -83,6 +89,14 @@ public partial class GeminiSettingsView : UserControl
 
     /// <summary>Test seam: whether the prompt currently exceeds the limit.</summary>
     internal bool IsPromptOverLimit { get; private set; }
+
+    /// <summary>
+    /// Reloads the fields from the bound store (the store is the app's live
+    /// instance under the F1 wiring, so in-UI saves are already visible to
+    /// dictation — this only syncs the boxes when the fields can be stale,
+    /// e.g. after Reset elsewhere). Safe to call before Show().
+    /// </summary>
+    internal void ReloadFromSettings() => LoadFromSettings();
 
     private void LoadFromSettings()
     {

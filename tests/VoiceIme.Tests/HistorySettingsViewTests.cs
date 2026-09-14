@@ -236,6 +236,21 @@ public sealed class HistorySettingsViewTests : IDisposable
     }
 
     [Fact]
+    public void BoundStore_IsInjectedInstance_RendersLiveAdds()
+    {
+        ClipboardStore? built = null;
+        TryRunOnSta(PathFor("bound.json"), store =>
+        {
+            built = store;
+            store.Add("spoken earlier");
+        }, view =>
+        {
+            Assert.Same(built, view.BoundStore);
+            Assert.Equal("spoken earlier", Assert.Single(view.Rows).Body);
+        });
+    }
+
+    [Fact]
     public void MainWindow_DefaultCtor_HostsHistoryView()
     {
         RunOnStaWindow(window =>

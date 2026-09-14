@@ -18,6 +18,8 @@ public sealed class TrayMenuTests
                 TrayMenuAction.Separator,
                 TrayMenuAction.CopyLastTranscript,
                 TrayMenuAction.Separator,
+                TrayMenuAction.History,
+                TrayMenuAction.Separator,
                 TrayMenuAction.Settings,
                 TrayMenuAction.Separator,
                 TrayMenuAction.Quit,
@@ -39,6 +41,8 @@ public sealed class TrayMenuTests
                 TrayMenuAction.Cancel,
                 TrayMenuAction.Separator,
                 TrayMenuAction.CopyLastTranscript,
+                TrayMenuAction.Separator,
+                TrayMenuAction.History,
                 TrayMenuAction.Separator,
                 TrayMenuAction.Settings,
                 TrayMenuAction.Separator,
@@ -78,6 +82,19 @@ public sealed class TrayMenuTests
 
         Assert.False(Assert.Single(empty, i => i.Action == TrayMenuAction.CopyLastTranscript).Enabled);
         Assert.True(Assert.Single(full, i => i.Action == TrayMenuAction.CopyLastTranscript).Enabled);
+    }
+
+    [Fact]
+    public void History_AlwaysEnabled_WithHistoryLabel()
+    {
+        foreach (var busy in new[] { false, true })
+        {
+            var items = TrayMenu.Items(busy, version: "v1.0.0", hasTranscript: false);
+
+            var history = Assert.Single(items, i => i.Action == TrayMenuAction.History);
+            Assert.True(history.Enabled);
+            Assert.Equal(TrayMenu.HistoryLabel, history.Label);
+        }
     }
 
     [Fact]

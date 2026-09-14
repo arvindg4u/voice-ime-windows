@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,7 @@ namespace VoiceIme;
 public partial class App : System.Windows.Application
 {
     private const int HotkeyId = 0xB001;
+    internal const int TrayTextLimit = 63;
     private NotifyIcon? _tray;
     private Notifier _notifier = new((_, _, _) => { });
     private HotkeyWindow? _hotkeyWindow;
@@ -80,7 +82,7 @@ public partial class App : System.Windows.Application
             _tray?.ShowBalloonTip(3000, title, body, ToToolTipIcon(severity)));
         _tray = new NotifyIcon
         {
-            Text = $"Voice IME — {_settings.Hotkey} to dictate",
+            Text = TrayText(_settings.Hotkey),
             Visible = true,
             Icon = System.Drawing.SystemIcons.Information,
             ContextMenuStrip = BuildMenu(),
@@ -93,8 +95,9 @@ public partial class App : System.Windows.Application
 
     /// <summary>
     /// Handy menu order (Task 7): idle = version (disabled) | Copy Last
-    /// Transcript | Settings… (Ctrl+,) | Quit; busy (recording/uploading) =
-    /// version | Cancel | Copy Last Transcript | Settings… | Quit.
+    /// Transcript | History… | Settings… (Ctrl+,) | Quit; busy
+    /// (recording/uploading) = version | Cancel | Copy Last Transcript |
+    /// History… | Settings… | Quit.
     /// Rows come from the pure <see cref="TrayMenu"/> model (unit-tested headless);
     /// this method only translates rows into WinForms items. Existing system
     /// icons stay — no binary assets in v1.
@@ -140,6 +143,9 @@ public partial class App : System.Windows.Application
             TrayMenuAction.CopyLastTranscript => new ToolStripMenuItem(
                 item.Label, System.Drawing.SystemIcons.Application.ToBitmap(),
                 (_, _) => CopyLastTranscript()),
+            TrayMenuAction.History => new ToolStripMenuItem(
+                item.Label, System.Drawing.SystemIcons.Application.ToBitmap(),
+                (_, _) => OpenHistory()),
             TrayMenuAction.Settings => new ToolStripMenuItem(
                 item.Label, System.Drawing.SystemIcons.Shield.ToBitmap(),
                 (_, _) => OpenSettings()),
@@ -512,14 +518,71 @@ public partial class App : System.Windows.Application
 
     private void AttachLiveHotkey(MainWindow window)
     {
-        if (window.SectionView(MainSection.General) is Views.GeneralSettingsView general
-            && _hotkeyWindow is not null)
+        if (window.SectionView(MainSection.General) is Views.GeneralSettingsView general)
         {
-            general.HotkeyRegistrar = new LiveHotkeyRegistrar(_hotkeyWindow);
+            if (_hotkeyWindow is not null)
+            {
+                general.HotkeyRegistrar = new LiveHotkeyRegistrar(_hotkeyWindow);
+            }
+
+            general.Saved -= RefreshTrayTextFromSave;
+            general.Saved += RefreshTrayTextFromSave;
         }
     }
 
     private MainWindow? _mainWindow;
+
+    /// <summary>
+    /// The app's live settings store every section view must bind to. Shared-
+    /// instance rule (F1): dictation reads SettingsStore state from here, so a
+    /// view holding any other instance would edit settings dictation never
+    /// sees — and this instance's key-cursor save would clobber the view's
+    /// freshly saved keys. Internal so tests can assert the wiring.
+    /// </summary>
+    internal SettingsStore LiveSettings => _settings;
+
+    /// <summary>
+    /// The app's live transcript store every History view must bind to.
+    /// Shared-instance rule (F2): same file, same divergence — a view on a
+    /// private store shows stale transcripts and its pin/delete saves clobber
+    /// transcripts dictated since the window opened.
+    /// </summary>
+    internal ClipboardStore LiveClips => _clips;
+
+    /// <summary>
+    /// Builds the settings shell with section views bound to the app's live
+    /// stores (F1/F2 shared-instance rule — never parameterless Load()s).
+    /// </summary>
+    internal MainWindow CreateMainWindow() => CreateMainWindow(
+        _settings,
+        _clips,
+        _hotkeyWindow is not null
+            ? new LiveHotkeyRegistrar(_hotkeyWindow)
+            : new NullHotkeyRegistrar(),
+        MicrophoneDevices.ListNames);
+
+    /// <summary>
+    /// Static shell builder behind <see cref="CreateMainWindow"/> — the F1/F2
+    /// wiring tests drive this overload directly so they assert the live-store
+    /// bindings without constructing the singleton
+    /// <see cref="System.Windows.Application"/> (only one may exist per
+    /// process) or touching disk/DPAPI.
+    /// </summary>
+    internal static MainWindow CreateMainWindow(
+        SettingsStore settings,
+        ClipboardStore clips,
+        IHotkeyRegistrar registrar,
+        Func<IReadOnlyList<string>> listMicrophones)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(clips);
+        ArgumentNullException.ThrowIfNull(registrar);
+        ArgumentNullException.ThrowIfNull(listMicrophones);
+        return new(
+            () => new Views.GeneralSettingsView(settings, registrar, listMicrophones),
+            () => new Views.GeminiSettingsView(settings),
+            () => new Views.HistorySettingsView(clips));
+    }
 
     /// <summary>
     /// Opens the settings shell on the Gemini section (the rehomed legacy
@@ -527,23 +590,63 @@ public partial class App : System.Windows.Application
     /// </summary>
     internal void OpenSettings()
     {
-        _mainWindow ??= new MainWindow();
+        _mainWindow ??= CreateMainWindow();
         AttachLiveHotkey(_mainWindow);
+        RefreshSectionViews(_mainWindow, _settings, _clips);
         _mainWindow.NavigateTo(MainSection.Gemini);
         ShowMainWindow();
     }
 
+    /// <summary>
+    /// Opens the main window on the History section (the rehomed legacy
+    /// HistoryWindow content) — the Task 5 entry point, reachable from the
+    /// tray History… row. The view is already bound to <see cref="LiveClips"/>
+    /// at construction; <see cref="RefreshSectionViews"/> re-syncs it here so
+    /// transcripts dictated while the window was hidden appear, and the
+    /// settings fields reload from <see cref="LiveSettings"/>.
+    /// </summary>
     internal void OpenHistory()
     {
-        _mainWindow ??= new MainWindow();
-        if (_mainWindow.SectionView(MainSection.History)
-            is Views.HistorySettingsView history)
-        {
-            history.BindStore(_clips);
-        }
-
+        _mainWindow ??= CreateMainWindow();
+        AttachLiveHotkey(_mainWindow);
+        RefreshSectionViews(_mainWindow, _settings, _clips);
         _mainWindow.NavigateTo(MainSection.History);
         ShowMainWindow();
+    }
+
+    /// <summary>
+    /// Re-syncs a shell's views with the shared stores before it is shown:
+    /// the History view rebinds to the live clips (transcripts dictated while
+    /// the window was hidden would otherwise never appear) and the
+    /// General/Gemini fields reload from the live settings. Static with
+    /// explicit stores so the wiring tests can drive it without constructing
+    /// the singleton <see cref="System.Windows.Application"/>. Views built
+    /// over App's instances observe the same objects dictation reads, so this
+    /// is a display refresh, not a divergence repair.
+    /// </summary>
+    internal static void RefreshSectionViews(
+        MainWindow? window, SettingsStore settings, ClipboardStore clips)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(clips);
+        if (window is null) return;
+        if (window.SectionView(MainSection.History)
+            is Views.HistorySettingsView history)
+        {
+            history.BindStore(clips);
+        }
+
+        if (window.SectionView(MainSection.General)
+            is Views.GeneralSettingsView general)
+        {
+            general.ReloadFromSettings();
+        }
+
+        if (window.SectionView(MainSection.Gemini)
+            is Views.GeminiSettingsView gemini)
+        {
+            gemini.ReloadFromSettings();
+        }
     }
 
     internal void ShowMainWindow()
@@ -566,10 +669,40 @@ public partial class App : System.Windows.Application
         _mainWindow.Activate();
     }
 
+    /// <summary>
+    /// The tray tooltip for a hotkey — WinForms caps tooltips at 63 chars, so
+    /// this truncates (same rule as <see cref="SetTray"/>).
+    /// </summary>
+    internal static string TrayText(string hotkey) =>
+        TruncateTrayText($"Voice IME — {hotkey} to dictate");
+
+    /// <summary>WinForms caps tooltips at 63 chars — truncate, never throw.</summary>
+    internal static string TruncateTrayText(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return text.Length > TrayTextLimit ? text[..TrayTextLimit] : text;
+    }
+
+    /// <summary>
+    /// Refreshes the tray tooltip from the live settings store — call after
+    /// the hotkey changes (the tooltip is otherwise built once at startup).
+    /// </summary>
+    internal void RefreshTrayText()
+    {
+        if (_tray is null) return;
+        _tray.Text = TrayText(_settings.Hotkey);
+    }
+
+    /// <summary>
+    /// <see cref="Views.GeneralSettingsView.Saved"/> adapter: the event
+    /// carries the saved store, the tooltip re-reads the live one.
+    /// </summary>
+    private void RefreshTrayTextFromSave(SettingsStore _) => RefreshTrayText();
+
     private void SetTray(string text)
     {
         if (_tray is null) return;
-        _tray.Text = text.Length > 63 ? text[..63] : text;
+        _tray.Text = TruncateTrayText(text);
         _mainWindow?.SetStatus(text);
     }
 

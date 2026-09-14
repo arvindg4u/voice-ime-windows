@@ -27,6 +27,12 @@ public partial class GeneralSettingsView : UserControl
     private readonly Func<IReadOnlyList<string>> _listMicrophones;
     private readonly Action<SettingsStore> _saver;
 
+    /// <summary>
+    /// The shared <see cref="SettingsStore"/> this view edits — the F1/F2
+    /// shared-instance wiring asserts the app's live store lands here.
+    /// </summary>
+    internal SettingsStore BoundSettings => _settings;
+
     private bool _initializing = true;
     private bool _capturing;
     private Window? _captureWindow;
@@ -87,6 +93,13 @@ public partial class GeneralSettingsView : UserControl
 
     /// <summary>Test seam: mute toggle state.</summary>
     internal bool? MuteChecked => MuteCheck.IsChecked;
+
+    /// <summary>
+    /// Re-reads the bound store into the controls (see
+    /// <see cref="GeminiSettingsView.ReloadFromSettings"/> — same shared-store
+    /// rationale). Skips hotkey capture state: never call mid-capture.
+    /// </summary>
+    internal void ReloadFromSettings() => LoadFromSettings();
 
     private void LoadFromSettings()
     {
@@ -473,6 +486,7 @@ public partial class GeneralSettingsView : UserControl
         {
             _saver(_settings);
             error = null;
+            Saved?.Invoke(_settings);
             return true;
         }
         catch (Exception ex)
@@ -481,4 +495,12 @@ public partial class GeneralSettingsView : UserControl
             return false;
         }
     }
+
+    /// <summary>
+    /// Raised after the view persists the shared <see cref="SettingsStore"/>
+    /// (hotkey commit, activation pick, microphone, mute). App observes it to
+    /// refresh tray chrome that is otherwise built once at startup. Not raised
+    /// on save failure.
+    /// </summary>
+    internal event Action<SettingsStore>? Saved;
 }

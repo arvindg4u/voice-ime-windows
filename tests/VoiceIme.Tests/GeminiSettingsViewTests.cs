@@ -131,6 +131,31 @@ public sealed class GeminiSettingsViewTests
     }
 
     [Fact]
+    public void BindsInjectedStore_ExposesSameInstance()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            Assert.Same(store, view.BoundSettings);
+        });
+    }
+
+    [Fact]
+    public void ReloadFromSettings_ExternalChange_RefreshesFields()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            store.BaseUrl = "https://example.test/v1beta";
+            store.Model = "test-model";
+            view.ReloadFromSettings();
+
+            Assert.Equal("https://example.test/v1beta", view.BaseUrlText);
+            Assert.Equal("test-model", view.ModelText);
+        });
+    }
+
+    [Fact]
     public void MainWindow_DefaultCtor_HostsGeminiView()
     {
         RunOnStaWindow(window =>

@@ -112,6 +112,57 @@ public sealed class GeneralSettingsViewTests
     }
 
     [Fact]
+    public void BindsInjectedStore_ExposesSameInstance()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
+        {
+            Assert.Same(store, view.BoundSettings);
+        });
+    }
+
+    [Fact]
+    public void ApplyHotkey_Success_RaisesSavedForTrayRefresh()
+    {
+        var store = new SettingsStore();
+        SettingsStore? raised = null;
+        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
+        {
+            view.Saved += s => raised = s;
+            view.ApplyHotkey("Alt+F4", HotkeyChord.DefaultChord);
+
+            Assert.Same(store, raised);
+        });
+    }
+
+    [Fact]
+    public void ApplyHotkey_Failure_DoesNotRaiseSaved()
+    {
+        var store = new SettingsStore();
+        var raised = false;
+        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
+        {
+            view.Saved += _ => raised = true;
+            view.ApplyHotkey("bogus", HotkeyChord.DefaultChord);
+
+            Assert.False(raised);
+        });
+    }
+
+    [Fact]
+    public void ReloadFromSettings_ExternalChange_RefreshesChip()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
+        {
+            store.Hotkey = "Alt+F4";
+            view.ReloadFromSettings();
+
+            Assert.Equal("Alt+F4", view.HotkeyLabel);
+        });
+    }
+
+    [Fact]
     public void MainWindow_DefaultCtor_HostsGeneralView()
     {
         RunOnStaWindow(window =>
