@@ -79,7 +79,11 @@ public sealed class RestRegressionTests
         using var llm = new LlmClient(KeyedHandler(
             ("k1", HttpStatusCode.OK, OkPayload("never"))).ToHttpClient());
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        // Note: HttpClient surfaces cancellation as TaskCanceledException (an
+        // OperationCanceledException subtype), so ThrowsAnyAsync pins the
+        // contract that matters — cancel propagates unwrapped, never as
+        // TranscribeException — without coupling to the concrete subtype.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             llm.TranscribeAsync(new byte[100], ["k1"], BaseUrl, Model,
                 ct: new CancellationToken(canceled: true)));
     }
