@@ -96,7 +96,7 @@ public sealed class AudioRecorder : IDisposable
         _capture.DataAvailable += (_, e) =>
         {
             _pcm.Write(e.Buffer, 0, e.BytesRecorded);
-            var chunk = e.Buffer[..e.BytesRecorded];
+            var chunk = e.Buffer[..e.BytesRecorded].ToArray();
             PcmChunkAvailable?.Invoke(chunk);
             var level = ComputePeak(e.Buffer, e.BytesRecorded);
             LevelChanged?.Invoke(Magnitude(level));

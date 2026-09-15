@@ -26,7 +26,7 @@ Src: `LiveProtocol.cs` (new), `LiveSessionGuard.cs` (new), `FinalAccumulator.cs`
 Tests: `LiveProtocolTests`, `LiveSessionGuardTests`, `FinalAccumulatorTests`, `LiveSocketTests`,
 `LiveSessionTests`, `LiveTransportTests`, `AudioRecorderLiveSeamTests` (all new),
 `LlmClientRoutingTests` (+39: WebSocket/no-HTTP + REST-400→Live assertions),
-`TranscriptionContractsTests` (+22). No App/paste changes.
+`TranscriptionContractsTests` (+22). No App/paste changes in the Phase-2 delta (`2cab9b1..HEAD`); the whole-branch diff vs main does include Phase 1's one-line SmartMode threading fix in App.xaml.cs (no paste logic).
 
 ## Live architecture
 
