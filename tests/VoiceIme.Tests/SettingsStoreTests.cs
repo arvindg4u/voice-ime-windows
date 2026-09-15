@@ -162,7 +162,7 @@ public sealed class SettingsStoreTests
     public void Load_FrozenV0Fixture_GainsSchemaVersionAndNewDefaults()
     {
         // Task 9 owns this: frozen v0 bytes (only baseUrl/model/keys circa
-        // Task 1) must load with schemaVersion 1 plus every Task 3 field at
+        // Task 1) must load with schemaVersion 1 plus every newer field at
         // its default, without warnings — v0→v1 is a clean migration.
         var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
         SettingsStore.SettingsPathOverride = () => path;
@@ -174,7 +174,7 @@ public sealed class SettingsStoreTests
             // Act
             var loaded = SettingsStore.Load();
 
-            // Assert
+            // Assert: Task 3 general fields.
             Assert.Equal(SettingsStore.CurrentSchemaVersion, loaded.SchemaVersion);
             Assert.Equal("https://example.invalid", loaded.BaseUrl);
             Assert.Equal("m", loaded.Model);
@@ -182,10 +182,135 @@ public sealed class SettingsStoreTests
             Assert.Equal(ActivationModes.Toggle, loaded.ActivationMode);
             Assert.Equal("", loaded.Microphone);
             Assert.False(loaded.MuteWhileRecording);
+
+            // Assert: T1 advanced fields.
+            Assert.False(loaded.StartHidden);
+            Assert.False(loaded.Autostart);
+            Assert.True(loaded.ShowTrayIcon);
+            Assert.Equal(OverlayModes.Full, loaded.ShowOverlay);
+            Assert.False(loaded.AutoSubmit);
+            Assert.Equal(PasteMethods.CtrlV, loaded.PasteMethod);
+            Assert.Equal(SettingsStore.DefaultHistoryLimit, loaded.HistoryLimit);
+
+            // Assert: T2 about fields.
             Assert.Equal(AppThemes.System, loaded.Theme);
             Assert.Equal(AppLanguages.English, loaded.Language);
+
+            // Assert: T6 sound + cancel fields.
+            Assert.Equal(AudioChannels.Mono, loaded.Channel);
+            Assert.Equal("", loaded.OutputDevice);
+            Assert.Equal(SettingsStore.DefaultVolume, loaded.Volume);
+            Assert.False(loaded.AudioFeedback);
+            Assert.Equal(SettingsStore.DefaultCancelHotkey, loaded.CancelHotkey);
+
+            // Assert: T7 prompt library.
+            Assert.Empty(loaded.Prompts);
+            Assert.Equal("", loaded.ActivePrompt);
+
+            // Assert: T9 first-run hint.
+            Assert.False(loaded.SeenHint);
+
             Assert.False(loaded.HasLoadWarnings);
             Assert.Empty(loaded.LoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    // Task 9 (Handy parity gaps): first-run hint. Additive bool, default
+    // false — Load/Save round-trip it, old files default, corrupt files
+    // salvage it, never throw.
+
+    [Fact]
+    public void Load_OldFileWithoutSeenHint_DefaultsFalse()
+    {
+        // Pre-Task-9 file — no seenHint key, no DPAPI blob, any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.False(loaded.SeenHint);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_SeenHintTrue_ReadsThrough()
+    {
+        // Valid-JSON load path (not salvage): the persisted value sticks.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"seenHint":true}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.True(loaded.SeenHint);
+            Assert.False(loaded.HasLoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CorruptJson_SalvagesSeenHint()
+    {
+        // Truncated file — whole-parse fails; the intact seenHint pair
+        // salvages over the false default. Any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var corrupt = """{"baseUrl":"https://example.invalid","seenHint":true,"customPrompt":""";
+            File.WriteAllText(path, corrupt);
+
+            var loaded = SettingsStore.Load();
+
+            Assert.True(loaded.SeenHint);
+            Assert.True(loaded.HasLoadWarnings);
+
+            // Never wipes: the corrupt bytes stay for manual recovery.
+            Assert.Equal(corrupt, File.ReadAllText(path));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsSeenHint()
+    {
+        if (!OperatingSystem.IsWindows()) return; // Save uses DPAPI
+
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var store = new SettingsStore { SeenHint = true };
+            store.Save();
+
+            var reloaded = SettingsStore.Load();
+
+            Assert.True(reloaded.SeenHint);
         }
         finally
         {

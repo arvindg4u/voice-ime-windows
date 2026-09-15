@@ -108,6 +108,12 @@ public sealed class SettingsStore
     public List<PromptEntry> Prompts { get; set; } = [];
     public string ActivePrompt { get; set; } = "";
 
+    // Task 9 (Handy parity gaps): first-run hint banner. Shown once — when
+    // false the MainWindow shell shows the hint card; dismissing sets it true
+    // and persists through the normal save path. Same contract — additive,
+    // field-level default false, coerce-don't-throw (plain bool), no bump.
+    public bool SeenHint { get; set; }
+
     /// <summary>
     /// The text the backend sends: the active library entry's text, falling
     /// back to the legacy field when nothing matches (e.g. a store built
@@ -265,6 +271,7 @@ public sealed class SettingsStore
             cancelHotkey = CancelHotkey,
             prompts = Prompts.Select(static p => new { name = p.Name, text = p.Text }).ToList(),
             activePrompt = ActivePrompt,
+            seenHint = SeenHint,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
@@ -511,6 +518,7 @@ public sealed class SettingsStore
         }
 
         ActivePrompt = GetString(root, "activePrompt", ActivePrompt);
+        SeenHint = GetBool(root, "seenHint", SeenHint);
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
         // already read above.
@@ -693,6 +701,12 @@ public sealed class SettingsStore
         if (activePrompt is not null)
         {
             ActivePrompt = activePrompt;
+        }
+
+        var seenHint = SalvageBool(raw, "seenHint");
+        if (seenHint.HasValue)
+        {
+            SeenHint = seenHint.Value;
         }
 
         var version = SalvageInt(raw, "schemaVersion");

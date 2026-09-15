@@ -796,6 +796,9 @@ public partial class App : System.Windows.Application
         // invisible (Task 8 review HIGH). Reads the live store so toggling
         // the setting later takes effect without rebuilding the shell.
         window.CanHideWindow = () => settings.ShowTrayIcon;
+        // Task 9: first-run hint reads/persists SeenHint on the live store —
+        // dismiss saves through the normal path (s => s.Save()).
+        window.BindFirstRunHint(settings);
         return window;
     }
 

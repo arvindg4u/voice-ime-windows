@@ -83,6 +83,31 @@
             </StackPanel>
         </Border>
 
+        <!-- First-run hint (Task 9): shown once until dismissed (SeenHint).
+             Fixed above the scrollable content; Handy card styling. -->
+        <Border x:Name="FirstRunHintCard" DockPanel.Dock="Top" Margin="16,12,16,0"
+                Style="{DynamicResource HandySettingCard}" Visibility="Collapsed">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <TextBlock Text="FIRST RUN" Style="{DynamicResource HandyGroupHeader}"
+                               Margin="0,0,0,4" />
+                    <TextBlock x:Name="FirstRunHintText" FontSize="13"
+                               Foreground="{DynamicResource HandyText}" TextWrapping="Wrap"
+                               Text="Press Ctrl+Shift+Space to dictate." />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                            VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <Button x:Name="FirstRunHintSettingsButton"
+                            Style="{DynamicResource HandySecondaryButton}"
+                            Content="Open Settings" Margin="0,0,8,0"
+                            Click="FirstRunHintSettingsButton_Click" />
+                    <Button x:Name="FirstRunHintDismissButton"
+                            Style="{DynamicResource HandySecondaryButton}"
+                            Content="Dismiss" Click="FirstRunHintDismissButton_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- Content: 16px padding, scrollable; section UserControls go here. -->
         <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16">
             <ContentControl x:Name="SectionHost" />

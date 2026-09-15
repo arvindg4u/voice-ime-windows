@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<MainSection, System.Windows.Controls.Button> _navButtons = new();
     private readonly Dictionary<MainSection, object> _sectionViews = new();
     private bool _permitClose;
+    private SettingsStore? _firstRunHintSettings;
+    private Action<SettingsStore>? _firstRunHintSaver;
 
     public MainSection CurrentSection { get; private set; } = MainSection.General;
 
@@ -172,6 +174,82 @@ public partial class MainWindow : Window
 
     /// <summary>Test seam: the sidebar button backing a section.</summary>
     internal System.Windows.Controls.Button NavButtonFor(MainSection section) => _navButtons[section];
+
+    /// <summary>
+    /// Binds the first-run hint banner (Task 9): visible while
+    /// <c>SeenHint</c> is false, hidden once set. Called by App's static
+    /// builder with the live store right after construction; tests inject a
+    /// no-op saver so dismiss never touches disk. Binding never touches
+    /// disk; the click handlers never throw (fail-fast null check here is a
+    /// programmer-error guard, same as <see cref="SetStatus"/>).
+    /// </summary>
+    internal void BindFirstRunHint(SettingsStore settings, Action<SettingsStore>? saver = null)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        _firstRunHintSettings = settings;
+        _firstRunHintSaver = saver ?? (static s => s.Save());
+        RefreshFirstRunHint();
+    }
+
+    /// <summary>Test seam: whether the first-run hint card is shown.</summary>
+    internal bool IsFirstRunHintVisible =>
+        FirstRunHintCard.Visibility == Visibility.Visible;
+
+    private void RefreshFirstRunHint()
+    {
+        try
+        {
+            if (_firstRunHintSettings is null)
+            {
+                FirstRunHintCard.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            FirstRunHintText.Text =
+                $"Press {_firstRunHintSettings.Hotkey} to dictate.";
+            FirstRunHintCard.Visibility = _firstRunHintSettings.SeenHint
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+        catch
+        {
+            // Banner refresh is best-effort — never break the shell.
+            FirstRunHintCard.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void FirstRunHintSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // Navigate without dismissing — dismiss is explicit only.
+            NavigateTo(MainSection.General);
+        }
+        catch
+        {
+            // Handlers never throw.
+        }
+    }
+
+    private void FirstRunHintDismissButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_firstRunHintSettings is null)
+            {
+                FirstRunHintCard.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            _firstRunHintSettings.SeenHint = true;
+            _firstRunHintSaver?.Invoke(_firstRunHintSettings);
+            RefreshFirstRunHint();
+        }
+        catch
+        {
+            // Handlers never throw.
+        }
+    }
 
     protected override void OnClosing(CancelEventArgs e)
     {
