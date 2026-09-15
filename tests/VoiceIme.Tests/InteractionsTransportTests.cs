@@ -142,7 +142,10 @@ public sealed class InteractionsTransportTests
         var mock = new MockHttpMessageHandler();
         mock.Fallback.Respond(HttpStatusCode.OK, "application/json", """{"output_text":"never"}""");
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        // ThrowsAnyAsync: HttpClient surfaces cancellation as
+        // TaskCanceledException (an OperationCanceledException subtype) and
+        // xUnit ThrowsAsync is exact-match — same pin as RestRegressionTests.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             TransportFor(mock).TranscribeAsync(
                 RequestFor("k1"), new CancellationToken(canceled: true)));
     }
