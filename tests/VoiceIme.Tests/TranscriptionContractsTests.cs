@@ -22,16 +22,26 @@ public sealed class TranscriptionContractsTests
     }
 
     [Fact]
-    public async Task LiveStub_ThrowsPhase2ErrorWithoutTouchingNetwork()
+    public async Task LiveTransport_ScriptedFinal_ReturnsLiveResult()
     {
-        ITranscriptionTransport transport = new LiveTranscriptionTransport();
+        var factories = new FakeLiveSocketFactory();
+        factories.Build = () =>
+        {
+            var s = new FakeLiveSocket();
+            s.EnqueueText("""{"setupComplete":{}}""");
+            s.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"contract-hi"}}}""");
+            s.EnqueueText("""{"serverContent":{"turnComplete":true}}""");
+            return s;
+        };
+        ITranscriptionTransport transport = new LiveTranscriptionTransport(
+            "https://example.com", new LiveSessionGuard(), factories);
         var request = new TranscriptionRequest(
-            AudioWav: new byte[44], Model: "gemini-live-2.5", ApiKeys: ["k1"]);
+            AudioWav: AudioRecorder.TestToneWav(), Model: "gemini-live-2.5", ApiKeys: ["k1"]);
 
-        var ex = await Assert.ThrowsAsync<TranscribeException>(() =>
-            transport.TranscribeAsync(request, CancellationToken.None));
+        var result = await transport.TranscribeAsync(request, CancellationToken.None);
 
-        Assert.Contains("Phase 2", ex.Message);
+        Assert.Equal("contract-hi", result.Transcript);
+        Assert.Equal(TransportKind.Live, result.TransportUsed);
     }
 
     [Fact]

@@ -36,16 +36,30 @@ public sealed class LlmClientRoutingTests
     }
 
     [Fact]
-    public async Task TranscribeAsync_LiveCandidate_ThrowsPhase2WithoutHttp()
+    public async Task TranscribeAsync_LiveCandidate_StreamsOverWebSocketWithoutHttp()
     {
         var mock = new MockHttpMessageHandler();
         mock.Fallback.Throw(new System.InvalidOperationException("must not call HTTP"));
+        var rest = mock.When(HttpMethod.Post, RestEndpoint)
+            .Respond(HttpStatusCode.OK, "application/json", RestOk("must-not-use"));
         using var llm = new LlmClient(mock.ToHttpClient());
+        var factories = new FakeLiveSocketFactory();
+        factories.Build = () =>
+        {
+            var s = new FakeLiveSocket();
+            s.EnqueueText("""{"setupComplete":{}}""");
+            s.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"live-hi"}}}""");
+            s.EnqueueText("""{"serverContent":{"turnComplete":true}}""");
+            return s;
+        };
+        llm.LiveSocketsForTests = factories;
 
-        var ex = await Assert.ThrowsAsync<TranscribeException>(() =>
-            llm.TranscribeAsync(new byte[100], ["k1"], BaseUrl, LiveModel));
+        var (transcript, used) = await llm.TranscribeAsync(
+            AudioRecorder.TestToneWav(), ["k1"], BaseUrl, LiveModel);
 
-        Assert.Contains("Phase 2", ex.Message);
+        Assert.Equal("live-hi", transcript);
+        Assert.Equal(0, used);
+        Assert.Equal(0, mock.GetMatchCount(rest));
     }
 
     [Fact]
@@ -56,11 +70,22 @@ public sealed class LlmClientRoutingTests
             .Respond(HttpStatusCode.BadRequest, "application/json",
                 "This model only supports bidiGenerateContent");
         using var llm = new LlmClient(mock.ToHttpClient());
+        var factories = new FakeLiveSocketFactory();
+        factories.Build = () =>
+        {
+            var s = new FakeLiveSocket();
+            s.EnqueueText("""{"setupComplete":{}}""");
+            s.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"switched"}}}""");
+            s.EnqueueText("""{"serverContent":{"turnComplete":true}}""");
+            return s;
+        };
+        llm.LiveSocketsForTests = factories;
 
-        var ex = await Assert.ThrowsAsync<TranscribeException>(() =>
-            llm.TranscribeAsync(new byte[100], ["k1"], BaseUrl, RestModel));
+        var (transcript, used) = await llm.TranscribeAsync(
+            AudioRecorder.TestToneWav(), ["k1"], BaseUrl, RestModel);
 
-        Assert.Contains("Phase 2", ex.Message);
+        Assert.Equal("switched", transcript);
+        Assert.Equal(0, used);
         Assert.Equal(1, mock.GetMatchCount(rest));
     }
 

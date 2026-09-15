@@ -22,6 +22,9 @@ public sealed class TranscribeException(string message, Exception? inner = null)
 public sealed class LlmClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly LiveSessionGuard _liveGuard = new();
+
+    internal ILiveSocketFactory? LiveSocketsForTests { get; set; }
 
     public LlmClient(HttpClient? http = null)
     {
@@ -58,7 +61,15 @@ public sealed class LlmClient : IDisposable
         switch (ModelRouter.RouteModel(request.Model))
         {
             case TransportKind.Live:
-                return await new LiveTranscriptionTransport().TranscribeAsync(request, ct);
+                try
+                {
+                    return await NewLiveTransport(baseUrl).TranscribeAsync(request, ct);
+                }
+                catch (TransportFallbackException ex)
+                {
+                    // Safety net: no Live code throws this, so collapse it to a safe failure.
+                    throw new TranscribeException("Transcription failed — try again", ex);
+                }
             case TransportKind.Interactions:
                 return await new InteractionsTranscriptionTransport(_http, baseUrl)
                     .TranscribeAsync(request, ct);
@@ -70,7 +81,7 @@ public sealed class LlmClient : IDisposable
                 }
                 catch (TransportFallbackException fb) when (fb.Target == TransportKind.Live)
                 {
-                    return await new LiveTranscriptionTransport().TranscribeAsync(
+                    return await NewLiveTransport(baseUrl).TranscribeAsync(
                         request with { StartKeyIndex = fb.KeyIndex }, ct);
                 }
                 catch (TransportFallbackException fb) when (fb.Target == TransportKind.Interactions)
@@ -80,6 +91,9 @@ public sealed class LlmClient : IDisposable
                 }
         }
     }
+
+    private LiveTranscriptionTransport NewLiveTransport(string baseUrl) =>
+        new(baseUrl, _liveGuard, LiveSocketsForTests ?? new ClientWebSocketLiveSocketFactory());
 
     internal static string BuildGeminiRequestJson(string audioB64, string customPrompt) =>
         RestTranscriptionTransport.BuildGeminiRequestJson(audioB64, customPrompt);
