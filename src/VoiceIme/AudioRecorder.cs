@@ -27,6 +27,13 @@ public sealed class AudioRecorder : IDisposable
     public event Action<float>? LevelChanged;
     public event Action? AutoStopped;
 
+    /// <summary>
+    /// Phase-3 streaming hook: raw 16-bit mono 16 kHz PCM per capture buffer,
+    /// raised on the NAudio capture thread with a defensive copy (NAudio reuses
+    /// its buffer). Currently unwired; the REST path is unaffected.
+    /// </summary>
+    public event Action<byte[]>? PcmChunkAvailable;
+
     public bool IsRecording => _capture is not null;
 
     /// <summary>Pure helper: true when peak is below the silence threshold.</summary>
@@ -89,6 +96,8 @@ public sealed class AudioRecorder : IDisposable
         _capture.DataAvailable += (_, e) =>
         {
             _pcm.Write(e.Buffer, 0, e.BytesRecorded);
+            var chunk = e.Buffer[..e.BytesRecorded];
+            PcmChunkAvailable?.Invoke(chunk);
             var level = ComputePeak(e.Buffer, e.BytesRecorded);
             LevelChanged?.Invoke(Magnitude(level));
             if ((DateTime.UtcNow - _startUtc).TotalMilliseconds >= MaxDurationMs)
