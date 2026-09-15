@@ -1,12 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -43,110 +38,54 @@ public sealed class LlmClient : IDisposable
         string model,
         int startIndex = 0,
         string customPrompt = "",
+        bool smartMode = false,
         CancellationToken ct = default)
     {
-        var keys = apiKeys
-            .Select(k => k.Trim())
-            .Where(k => k.Length > 0)
-            .ToList();
-        if (keys.Count == 0)
-            throw new TranscribeException("No API key — open Settings");
-
-        var audioB64 = Convert.ToBase64String(wav);
-        var body = BuildGeminiRequestJson(audioB64, customPrompt);
-        var url = $"{baseUrl.TrimEnd('/')}/models/{model}:generateContent";
-
-        var start = ((startIndex % keys.Count) + keys.Count) % keys.Count;
-        TranscribeException? last429 = null;
-        for (var i = 0; i < keys.Count; i++)
-        {
-            var idx = (start + i) % keys.Count;
-            using var request = new HttpRequestMessage(HttpMethod.Post, url);
-            request.Headers.TryAddWithoutValidation("x-goog-api-key", keys[idx]);
-            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-            HttpResponseMessage response;
-            try
-            {
-                response = await _http.SendAsync(request, ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                throw new TranscribeException("Network error — check connection", ex);
-            }
-
-            using (response)
-            {
-                var payload = await response.Content.ReadAsStringAsync(ct);
-                if ((int)response.StatusCode == 429)
-                {
-                    last429 = new TranscribeException("Rate limited on all keys — retry later");
-                    continue;
-                }
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw new TranscribeException(
-                        response.StatusCode == System.Net.HttpStatusCode.Unauthorized
-                            ? "Invalid API key — check Settings"
-                            : $"Request failed ({(int)response.StatusCode}) — try again");
-                }
-                var transcript = ParseTranscript(payload);
-                if (string.IsNullOrWhiteSpace(transcript))
-                    throw new TranscribeException("Got empty transcript — try again");
-                // Scrub audio from memory ASAP.
-                Array.Clear(wav, 0, wav.Length);
-                return (transcript, idx);
-            }
-        }
-        throw last429 ?? new TranscribeException("Rate limited on all keys — retry later");
+        var request = new TranscriptionRequest(wav, model, apiKeys, startIndex, customPrompt, smartMode);
+        var result = await TranscribeRoutedAsync(request, baseUrl, ct);
+        return (result.Transcript, result.UsedKeyIndex);
     }
 
-    internal static string BuildGeminiRequestJson(string audioB64, string customPrompt)
+    /// <summary>
+    /// Static routing first, then at most one transport switch: only the two
+    /// narrow 400 patterns (same key, no rotation for the switch) may move a
+    /// request. Fallback targets never fall back again, so loops are
+    /// impossible by construction.
+    /// </summary>
+    private async Task<TranscriptionResult> TranscribeRoutedAsync(
+        TranscriptionRequest request, string baseUrl, CancellationToken ct)
     {
-        var parts = new JsonArray
+        switch (ModelRouter.RouteModel(request.Model))
         {
-            new JsonObject
-            {
-                ["inlineData"] = new JsonObject
+            case TransportKind.Live:
+                return await new LiveTranscriptionTransport().TranscribeAsync(request, ct);
+            case TransportKind.Interactions:
+                return await new InteractionsTranscriptionTransport(_http, baseUrl)
+                    .TranscribeAsync(request, ct);
+            default:
+                try
                 {
-                    ["mimeType"] = "audio/wav",
-                    ["data"] = audioB64,
-                },
-            },
-            new JsonObject { ["text"] = "Transcribe this audio. Respond with the transcript only." },
-        };
-        var root = new JsonObject { ["contents"] = new JsonArray { new JsonObject { ["parts"] = parts } } };
-        if (!string.IsNullOrWhiteSpace(customPrompt))
-        {
-            root["systemInstruction"] = new JsonObject
-            {
-                ["parts"] = new JsonArray
+                    return await new RestTranscriptionTransport(_http, baseUrl)
+                        .TranscribeAsync(request, ct);
+                }
+                catch (TransportFallbackException fb) when (fb.Target == TransportKind.Live)
                 {
-                    new JsonObject { ["text"] = "User preferences: " + customPrompt.Trim() },
-                },
-            };
+                    return await new LiveTranscriptionTransport().TranscribeAsync(
+                        request with { StartKeyIndex = fb.KeyIndex }, ct);
+                }
+                catch (TransportFallbackException fb) when (fb.Target == TransportKind.Interactions)
+                {
+                    return await new InteractionsTranscriptionTransport(_http, baseUrl)
+                        .TranscribeAsync(request with { StartKeyIndex = fb.KeyIndex }, ct);
+                }
         }
-        return root.ToJsonString();
     }
 
-    internal static string ParseTranscript(string payload)
-    {
-        using var doc = JsonDocument.Parse(payload);
-        var sb = new StringBuilder();
-        if (!doc.RootElement.TryGetProperty("candidates", out var candidates))
-            return "";
-        foreach (var c in candidates.EnumerateArray())
-        {
-            if (!c.TryGetProperty("content", out var content)) continue;
-            if (!content.TryGetProperty("parts", out var parts)) continue;
-            foreach (var p in parts.EnumerateArray())
-            {
-                if (p.TryGetProperty("text", out var text))
-                    sb.Append(text.GetString());
-            }
-        }
-        return sb.ToString().Trim();
-    }
+    internal static string BuildGeminiRequestJson(string audioB64, string customPrompt) =>
+        RestTranscriptionTransport.BuildGeminiRequestJson(audioB64, customPrompt);
+
+    internal static string ParseTranscript(string payload) =>
+        RestTranscriptionTransport.ParseTranscript(payload);
 
     public void Dispose() => _http.Dispose();
 }

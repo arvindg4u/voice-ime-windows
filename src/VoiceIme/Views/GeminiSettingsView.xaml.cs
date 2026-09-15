@@ -35,7 +35,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
     /// </summary>
     internal SettingsStore BoundSettings => _settings;
     private readonly Func<byte[]> _recordTone;
-    private readonly Func<byte[], IReadOnlyList<string>, string, string, string, Task<(string Transcript, int UsedIndex)>> _transcribeAsync;
+    private readonly Func<byte[], IReadOnlyList<string>, string, string, string, bool, Task<(string Transcript, int UsedIndex)>> _transcribeAsync;
 
     public GeminiSettingsView()
         : this(SettingsStore.Load())
@@ -46,7 +46,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         SettingsStore settings,
         Action<SettingsStore>? saver = null,
         Func<byte[]>? recordTone = null,
-        Func<byte[], IReadOnlyList<string>, string, string, string, Task<(string Transcript, int UsedIndex)>>? transcribeAsync = null)
+        Func<byte[], IReadOnlyList<string>, string, string, string, bool, Task<(string Transcript, int UsedIndex)>>? transcribeAsync = null)
     {
         _settings = settings;
         _saver = saver ?? (static s => s.Save());
@@ -186,7 +186,8 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
                 SplitKeys(KeysBox.Text),
                 BaseUrlBox.Text.Trim(),
                 ModelBox.Text.Trim(),
-                PromptBox.Text.Trim());
+                PromptBox.Text.Trim(),
+                _settings.SmartMode);
             StatusText.Text = $"Test OK — transcript: {transcript}";
         }
         catch (Exception ex)
@@ -232,12 +233,13 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
     /// Default pipeline: the real <see cref="LlmClient"/> REST contract
     /// (tone bytes, round-robin from key 0, trimmed base URL/model/prompt).
     /// </summary>
-    private static async Task<(string Transcript, int UsedIndex)> DefaultTranscribeAsync(
+    private async Task<(string Transcript, int UsedIndex)> DefaultTranscribeAsync(
         byte[] wav,
         IReadOnlyList<string> keys,
         string baseUrl,
         string model,
-        string prompt)
+        string prompt,
+        bool smartMode)
     {
         using var llm = new LlmClient();
         return await llm.TranscribeAsync(
@@ -246,6 +248,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
             baseUrl,
             model,
             startIndex: 0,
-            customPrompt: prompt);
+            customPrompt: prompt,
+            smartMode: smartMode);
     }
 }

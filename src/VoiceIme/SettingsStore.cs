@@ -122,6 +122,9 @@ public sealed class SettingsStore
     public string ActivePromptText =>
         PromptLibrary.GetActiveText(Prompts, ActivePrompt, CustomPrompt);
 
+    /// <summary>Smart transcription for transcribe-family transports (Interactions mode "smart", future Live "SMART"). Default ON.</summary>
+    public bool SmartMode { get; set; } = true;
+
     /// <summary>
     /// Non-fatal problems from the last <see cref="Load"/> (corrupt file,
     /// bad enum string, undecryptable keys, unknown newer version). Empty on
@@ -272,6 +275,7 @@ public sealed class SettingsStore
             prompts = Prompts.Select(static p => new { name = p.Name, text = p.Text }).ToList(),
             activePrompt = ActivePrompt,
             seenHint = SeenHint,
+            smartMode = SmartMode,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
@@ -519,6 +523,7 @@ public sealed class SettingsStore
 
         ActivePrompt = GetString(root, "activePrompt", ActivePrompt);
         SeenHint = GetBool(root, "seenHint", SeenHint);
+        SmartMode = GetBool(root, "smartMode", SmartMode);
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
         // already read above.
@@ -707,6 +712,12 @@ public sealed class SettingsStore
         if (seenHint.HasValue)
         {
             SeenHint = seenHint.Value;
+        }
+
+        var smart = SalvageBool(raw, "smartMode");
+        if (smart.HasValue)
+        {
+            SmartMode = smart.Value;
         }
 
         var version = SalvageInt(raw, "schemaVersion");
