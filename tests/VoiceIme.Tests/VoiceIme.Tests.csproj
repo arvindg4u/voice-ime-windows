@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    Linux note: this suite targets net8.0-windows, so `dotnet build` works on
+    Linux (via EnableWindowsTargeting) but `dotnet test` cannot run here —
+    the test host needs the Microsoft.WindowsDesktop.App runtime, which ships
+    Windows-only. Full GUI-level coverage (STA view tests construct real WPF
+    controls) runs on windows-latest CI (.github/workflows/windows.yml).
+  -->
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>

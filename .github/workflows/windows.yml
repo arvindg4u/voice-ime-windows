@@ -15,6 +15,11 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      # This is the ONLY place full GUI-level coverage runs: the suite targets
+      # net8.0-windows and STA view tests construct real WPF controls, which
+      # need the Windows-only desktop runtime. On Linux `dotnet build` works
+      # (EnableWindowsTargeting) but `dotnet test` cannot execute — only
+      # compile + OS-independent logic is provable there.
       - name: Run unit tests
         timeout-minutes: 10
         run: dotnet test VoiceIme.Windows.sln -c Release --blame-hang --blame-hang-timeout 5m

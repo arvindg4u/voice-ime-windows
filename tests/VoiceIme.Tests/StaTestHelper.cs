@@ -13,6 +13,11 @@ namespace VoiceIme.Tests;
 /// window station) still pass vacuously via <c>IsHeadlessFailure</c>.
 /// All members of the "WpfSta" collection serialize through xUnit, so only
 /// one STA body runs at a time.
+/// Linux note: these STA bodies construct real WPF controls, which need the
+/// Windows-only desktop runtime. On Linux (or any headless runner with no
+/// window station) they pass vacuously via <c>IsHeadlessFailure</c> — only
+/// what is OS-independent actually executes. Full GUI-level coverage runs on
+/// windows-latest CI (.github/workflows/windows.yml).
 /// </summary>
 internal static class StaTestHelper
 {

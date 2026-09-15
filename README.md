@@ -236,6 +236,13 @@ dotnet publish src/VoiceIme/VoiceIme.csproj -c Release -r win-x64 --self-contain
 | Manual Test button | Settings → **Test** sends the 440 Hz tone end-to-end |
 | Manual flows | dictate into Notepad → paste · no-key error · all-429 error · airplane-mode retry · 5-min auto-stop · elevated-app limitation |
 
+> **Linux note:** this is a Windows GUI app (`net8.0-windows`, WPF). On
+> Linux only what is OS-independent can be tested — `dotnet build` proves
+> compile (via `EnableWindowsTargeting`), and STA view tests construct real
+> WPF controls, so they pass vacuously with no window station (see
+> `StaTestHelper`/`WpfStaCollection`). Full GUI-level coverage runs only on
+> windows-latest CI (`.github/workflows/windows.yml` → `dotnet test`).
+
 ---
 
 ## 📏 Limits
