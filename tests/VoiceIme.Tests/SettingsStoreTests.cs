@@ -740,4 +740,214 @@ public sealed class SettingsStoreTests
             File.Delete(path);
         }
     }
+
+    // Task 7 (Handy parity gaps): prompt library. Additive fields —
+    // Load/Save round-trips carry them, old files default, bad values
+    // coerce, legacy customPrompt migrates idempotently, never throw.
+
+    [Fact]
+    public void Load_OldFileWithoutPromptFields_UsesDefaults()
+    {
+        // Pre-Task-7 file (Task-6-era keys only) — no DPAPI blob, any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Empty(loaded.Prompts);
+            Assert.Equal("", loaded.ActivePrompt);
+            Assert.Equal("", loaded.ActivePromptText);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_LegacyCustomPrompt_MigratesToDefaultEntry()
+    {
+        // A pre-library file WITH text seeds a single Default entry, selected
+        // active; the legacy field mirrors the active text back.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"polish it","keyCursor":0}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.True(loaded.Prompts.SequenceEqual(
+                [new PromptEntry(PromptLibrary.DefaultPromptName, "polish it")]));
+            Assert.Equal(PromptLibrary.DefaultPromptName, loaded.ActivePrompt);
+            Assert.Equal("polish it", loaded.ActivePromptText);
+            Assert.Equal("polish it", loaded.CustomPrompt);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_Migration_IsIdempotentAcrossReloads()
+    {
+        // Save the migrated store, reload twice: still a single Default
+        // entry — never duplicates. Windows-only (Save uses DPAPI).
+        if (!OperatingSystem.IsWindows()) return;
+
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"legacy text","keyCursor":0}""");
+
+            var once = SettingsStore.Load();
+            once.Save();
+            var twice = SettingsStore.Load();
+            twice.Save();
+            var thrice = SettingsStore.Load();
+
+            Assert.Single(thrice.Prompts);
+            Assert.Equal(PromptLibrary.DefaultPromptName, thrice.ActivePrompt);
+            Assert.Equal("legacy text", thrice.ActivePromptText);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_PromptsAlreadyPresent_IgnoresLegacyCustomPrompt()
+    {
+        // Library owns the text once non-empty (documented rule) — the stale
+        // legacy value is overwritten by the mirror, not merged in.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"stale","keyCursor":0,"prompts":[{"name":"Work","text":"lib text"}],"activePrompt":"Work"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.True(loaded.Prompts.SequenceEqual([new PromptEntry("Work", "lib text")]));
+            Assert.Equal("Work", loaded.ActivePrompt);
+            Assert.Equal("lib text", loaded.ActivePromptText);
+            Assert.Equal("lib text", loaded.CustomPrompt);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_BadPromptValues_CoerceWithWarnings()
+    {
+        // Overlong coerces (truncated name/text warn), the unknown active
+        // name falls back to the first entry with a warning, a non-array
+        // prompts value yields the empty library with a warning. Any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var longName = new string('n', 61);
+            var longText = new string('x', 2001);
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"prompts":[{"name":"""" + longName + """","text":"""" + longText + """},{"name":"Work","text":"kept"},{"name":"work","text":"dup"},{"nope":1},"stray"],"activePrompt":"Ghost"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(2, loaded.Prompts.Count);
+            Assert.Equal(60, loaded.Prompts[0].Name.Length);
+            Assert.Equal(2000, loaded.Prompts[0].Text.Length);
+            Assert.Equal("Work", loaded.Prompts[1].Name);
+            Assert.Equal(loaded.Prompts[0].Name, loaded.ActivePrompt);
+            Assert.True(loaded.HasLoadWarnings);
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("Ghost"));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsPromptLibrary()
+    {
+        if (!OperatingSystem.IsWindows()) return; // Save uses DPAPI
+
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var store = new SettingsStore
+            {
+                Prompts =
+                [
+                    new PromptEntry("Work", "polish it"),
+                    new PromptEntry("Mail", "short replies"),
+                ],
+                ActivePrompt = "Mail",
+            };
+            store.Save();
+
+            var reloaded = SettingsStore.Load();
+
+            Assert.True(reloaded.Prompts.SequenceEqual(
+                [new PromptEntry("Work", "polish it"), new PromptEntry("Mail", "short replies")]));
+            Assert.Equal("Mail", reloaded.ActivePrompt);
+            Assert.Equal("short replies", reloaded.ActivePromptText);
+            Assert.Equal("short replies", reloaded.CustomPrompt);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CorruptJson_SalvagesActivePromptName()
+    {
+        // Truncated file — whole-parse fails; the surviving activePrompt name
+        // salvages (the prompts array cannot regex-survive, so the legacy
+        // customPrompt reseeds Default through Migrate). Any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var corrupt = """{"baseUrl":"https://example.invalid","customPrompt":"salvaged","activePrompt":"Active",""";
+            File.WriteAllText(path, corrupt);
+
+            var loaded = SettingsStore.Load();
+
+            Assert.True(loaded.Prompts.SequenceEqual(
+                [new PromptEntry(PromptLibrary.DefaultPromptName, "salvaged")]));
+            Assert.Equal(PromptLibrary.DefaultPromptName, loaded.ActivePrompt);
+            Assert.Equal("salvaged", loaded.ActivePromptText);
+            Assert.True(loaded.HasLoadWarnings);
+
+            // Never wipes: the corrupt bytes stay for manual recovery.
+            Assert.Equal(corrupt, File.ReadAllText(path));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
 }

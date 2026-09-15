@@ -139,6 +139,415 @@ public sealed class GeminiSettingsViewTests
     }
 
     [Fact]
+    public void Defaults_LoadIntoLibraryControls()
+    {
+        // Empty store: no dropdown items, blank name field and editor.
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            Assert.Equal(0, view.PromptCount);
+            Assert.Empty(view.PromptNames);
+            Assert.Null(view.SelectedPromptName);
+            Assert.Equal("", view.PromptName);
+        });
+    }
+
+    [Fact]
+    public void LoadFromSettings_ShowsActiveEntry()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "polish it"), new PromptEntry("Mail", "short")],
+            ActivePrompt = "Mail",
+            CustomPrompt = "short",
+        };
+        TryRunOnSta(store, view =>
+        {
+            Assert.True(view.PromptNames.SequenceEqual(["Work", "Mail"]));
+            Assert.Equal("Mail", view.SelectedPromptName);
+            Assert.Equal("Mail", view.PromptName);
+            Assert.Equal("short", view.PromptText);
+        });
+    }
+
+    [Fact]
+    public void SavePrompt_NewName_AppendsSelectsAndPersists()
+    {
+        var store = new SettingsStore();
+        var saved = new List<SettingsStore>();
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = "  Work  ";
+            view.PromptText = "  polish it  ";
+
+            var ok = view.SavePrompt();
+
+            Assert.True(ok);
+            Assert.True(store.Prompts.SequenceEqual([new PromptEntry("Work", "polish it")]));
+            Assert.Equal("Work", store.ActivePrompt);
+            Assert.Equal("polish it", store.ActivePromptText);
+            Assert.Equal("polish it", store.CustomPrompt);
+            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Work", view.SelectedPromptName);
+            Assert.Single(saved);
+        }, saver: saved.Add);
+    }
+
+    [Fact]
+    public void SavePrompt_ExistingName_UpsertsCaseInsensitively()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "old"), new PromptEntry("Mail", "short")],
+            ActivePrompt = "Mail",
+            CustomPrompt = "short",
+        };
+        var saved = new List<SettingsStore>();
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = "WORK";
+            view.PromptText = "new text";
+
+            var ok = view.SavePrompt();
+
+            Assert.True(ok);
+            // Canonical casing kept, order kept, other entry untouched.
+            Assert.True(store.Prompts.SequenceEqual(
+                [new PromptEntry("Work", "new text"), new PromptEntry("Mail", "short")]));
+            Assert.Equal("Work", store.ActivePrompt);
+            Assert.Equal("new text", store.CustomPrompt);
+            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Single(saved);
+        }, saver: saved.Add);
+    }
+
+    [Fact]
+    public void SavePrompt_BlankName_RejectsWithMessageAndKeepsStore()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "kept")],
+            ActivePrompt = "Work",
+            CustomPrompt = "kept",
+        };
+        var saved = new List<string>();
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = "   ";
+            view.PromptText = "changed";
+
+            var ok = view.SavePrompt();
+
+            Assert.False(ok);
+            Assert.Contains("required", view.StatusMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.True(store.Prompts.SequenceEqual([new PromptEntry("Work", "kept")]));
+            Assert.Empty(saved);
+        }, saver: s => saved.Add(s.ActivePromptText));
+    }
+
+    [Fact]
+    public void SavePrompt_NameOver60_RejectsWithMessageAndKeepsStore()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = new string('n', 61);
+            view.PromptText = "text";
+
+            var ok = view.SavePrompt();
+
+            Assert.False(ok);
+            Assert.Contains("60", view.StatusMessage, StringComparison.Ordinal);
+            Assert.Empty(store.Prompts);
+        });
+    }
+
+    [Fact]
+    public void SavePrompt_TextOver2000_RejectsWithMessageAndKeepsStore()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "kept")],
+            ActivePrompt = "Work",
+            CustomPrompt = "kept",
+        };
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = "Work";
+            view.PromptText = new string('x', 2001);
+
+            var ok = view.SavePrompt();
+
+            Assert.False(ok);
+            Assert.Contains("2000", view.StatusMessage, StringComparison.Ordinal);
+            Assert.True(store.Prompts.SequenceEqual([new PromptEntry("Work", "kept")]));
+        });
+    }
+
+    [Fact]
+    public void SavePrompt_WhenFull_Rejects21stWithMessage()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = Enumerable.Range(1, 20)
+                .Select(i => new PromptEntry($"P{i:00}", $"t{i}"))
+                .ToList(),
+            ActivePrompt = "P01",
+            CustomPrompt = "t1",
+        };
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = "Twenty-first";
+            view.PromptText = "extra";
+
+            var ok = view.SavePrompt();
+
+            Assert.False(ok);
+            Assert.Contains("20", view.StatusMessage, StringComparison.Ordinal);
+            Assert.Equal(20, store.Prompts.Count);
+            Assert.Equal("P01", store.ActivePrompt);
+        });
+    }
+
+    [Fact]
+    public void SavePrompt_SaverFailure_ReportsInline()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            view.PromptName = "Work";
+            view.PromptText = "text";
+
+            var ok = view.SavePrompt();
+
+            Assert.False(ok);
+            Assert.StartsWith("Save failed:", view.StatusMessage, StringComparison.Ordinal);
+        }, saver: _ => throw new InvalidOperationException("disk gone"));
+    }
+
+    [Fact]
+    public void SelectPrompt_Switch_CommitsOutgoingTextAndLoadsTarget()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "old work"), new PromptEntry("Mail", "short")],
+            ActivePrompt = "Work",
+            CustomPrompt = "old work",
+        };
+        var saved = new List<SettingsStore>();
+        TryRunOnSta(store, view =>
+        {
+            // Edit Work's text, then switch to Mail: Work keeps the edit.
+            view.PromptText = "edited work";
+
+            var ok = view.SelectPrompt("Mail");
+
+            Assert.True(ok);
+            Assert.True(store.Prompts.SequenceEqual(
+                [new PromptEntry("Work", "edited work"), new PromptEntry("Mail", "short")]));
+            Assert.Equal("Mail", store.ActivePrompt);
+            Assert.Equal("short", view.PromptText);
+            Assert.Equal("Mail", view.PromptName);
+            Assert.Equal("Mail", view.SelectedPromptName);
+            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Single(saved);
+        }, saver: saved.Add);
+    }
+
+    [Fact]
+    public void SelectPrompt_UnknownName_RejectsAndRestoresPicker()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "text")],
+            ActivePrompt = "Work",
+            CustomPrompt = "text",
+        };
+        TryRunOnSta(store, view =>
+        {
+            var ok = view.SelectPrompt("Ghost");
+
+            Assert.False(ok);
+            Assert.Contains("Ghost", view.StatusMessage, StringComparison.Ordinal);
+            Assert.Equal("Work", store.ActivePrompt);
+            Assert.Equal("Work", view.SelectedPromptName);
+        });
+    }
+
+    [Fact]
+    public void SelectPrompt_OverlongOutgoingText_BlocksSwitch()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "old"), new PromptEntry("Mail", "short")],
+            ActivePrompt = "Work",
+            CustomPrompt = "old",
+        };
+        TryRunOnSta(store, view =>
+        {
+            view.PromptText = new string('x', 2001);
+
+            var ok = view.SelectPrompt("Mail");
+
+            Assert.False(ok);
+            Assert.Contains("2000", view.StatusMessage, StringComparison.Ordinal);
+            Assert.Equal("Work", store.ActivePrompt);
+            Assert.Equal("Work", view.SelectedPromptName);
+        });
+    }
+
+    [Fact]
+    public void DeletePrompt_ActiveEntry_FallsBackToFirst()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "w"), new PromptEntry("Mail", "m")],
+            ActivePrompt = "Mail",
+            CustomPrompt = "m",
+        };
+        var saved = new List<SettingsStore>();
+        TryRunOnSta(store, view =>
+        {
+            var ok = view.DeletePrompt();
+
+            Assert.True(ok);
+            Assert.True(store.Prompts.SequenceEqual([new PromptEntry("Work", "w")]));
+            Assert.Equal("Work", store.ActivePrompt);
+            Assert.Equal("w", store.CustomPrompt);
+            Assert.Equal("w", view.PromptText);
+            Assert.Equal("Work", view.SelectedPromptName);
+            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Single(saved);
+        }, saver: saved.Add);
+    }
+
+    [Fact]
+    public void DeletePrompt_SaverFailure_ReportsInline()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "w")],
+            ActivePrompt = "Work",
+            CustomPrompt = "w",
+        };
+        TryRunOnSta(store, view =>
+        {
+            var ok = view.DeletePrompt();
+
+            Assert.False(ok);
+            Assert.StartsWith("Save failed:", view.StatusMessage, StringComparison.Ordinal);
+        }, saver: _ => throw new InvalidOperationException("disk gone"));
+    }
+
+    [Fact]
+    public void DeletePrompt_LastEntry_EmptiesLibraryAndEditor()
+    {
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "w")],
+            ActivePrompt = "Work",
+            CustomPrompt = "w",
+        };
+        TryRunOnSta(store, view =>
+        {
+            var ok = view.DeletePrompt();
+
+            Assert.True(ok);
+            Assert.Empty(store.Prompts);
+            Assert.Equal("", store.ActivePrompt);
+            Assert.Equal("", store.CustomPrompt);
+            Assert.Equal("", view.PromptText);
+            Assert.Equal("", view.PromptName);
+            Assert.Equal(0, view.PromptCount);
+        });
+    }
+
+    [Fact]
+    public void DeletePrompt_NothingSelected_RejectsWithMessage()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            var ok = view.DeletePrompt();
+
+            Assert.False(ok);
+            Assert.Contains("Select", view.StatusMessage, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void SaveNow_WritesEditorIntoActiveEntry()
+    {
+        // The plain Save footer commits the editor into the active prompt —
+        // editing no longer bypasses the library.
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "old")],
+            ActivePrompt = "Work",
+            CustomPrompt = "old",
+        };
+        var saved = new List<SettingsStore>();
+        TryRunOnSta(store, view =>
+        {
+            view.PromptText = "  edited  ";
+
+            var ok = view.SaveNow();
+
+            Assert.True(ok);
+            Assert.True(store.Prompts.SequenceEqual([new PromptEntry("Work", "edited")]));
+            Assert.Equal("edited", store.CustomPrompt);
+            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Single(saved);
+        }, saver: saved.Add);
+    }
+
+    [Fact]
+    public void TestNowAsync_SendsActivePromptText()
+    {
+        // The backend pipeline receives the active text, not the stale store
+        // copy — the byte-identical contract at the LlmClient boundary.
+        var store = new SettingsStore
+        {
+            Prompts = [new PromptEntry("Work", "active text")],
+            ActivePrompt = "Work",
+            CustomPrompt = "active text",
+        };
+        // Captured via closure and asserted INSIDE the STA body: on
+        // headless runners the body never runs and the test passes vacuously
+        // (an assertion after TryRunOnSta would fail on the unset null).
+        string? sentPrompt = null;
+        TryRunOnSta(store, view =>
+        {
+            view.TestNowAsync().GetAwaiter().GetResult();
+
+            Assert.StartsWith("Test OK — transcript:", view.StatusMessage, StringComparison.Ordinal);
+            Assert.Equal("active text", sentPrompt);
+        }, transcribeAsync: (_, _, _, _, prompt) =>
+        {
+            sentPrompt = prompt;
+            return Task.FromResult(("hello", 0));
+        });
+    }
+
+    [Fact]
+    public void ReloadFromSettings_ExternalLibraryChange_RefreshesPickerAndEditor()
+    {
+        var store = new SettingsStore();
+        TryRunOnSta(store, view =>
+        {
+            store.Prompts = [new PromptEntry("Work", "w")];
+            store.ActivePrompt = "Work";
+            store.CustomPrompt = "w";
+            view.ReloadFromSettings();
+
+            Assert.True(view.PromptNames.SequenceEqual(["Work"]));
+            Assert.Equal("Work", view.SelectedPromptName);
+            Assert.Equal("Work", view.PromptName);
+            Assert.Equal("w", view.PromptText);
+        });
+    }
+
+    [Fact]
     public void ReloadFromSettings_ExternalChange_RefreshesFields()
     {
         var store = new SettingsStore();

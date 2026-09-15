@@ -40,10 +40,45 @@
             </StackPanel>
         </Border>
 
-        <TextBlock Text="CUSTOM PROMPT" Style="{DynamicResource HandyGroupHeader}" />
+        <TextBlock Text="PROMPT LIBRARY" Style="{DynamicResource HandyGroupHeader}" />
         <Border Style="{DynamicResource HandySettingCard}">
             <StackPanel>
-                <TextBlock Text="Custom prompt (max 2000 chars, blank to disable)"
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <ComboBox x:Name="PromptSelector" DockPanel.Dock="Right" MinWidth="200"
+                              VerticalAlignment="Center" HorizontalAlignment="Right"
+                              FontSize="13" Foreground="{DynamicResource HandyText}"
+                              FontFamily="{DynamicResource HandyFontFamily}"
+                              ToolTip="Saved prompts — picking one loads it into the editor"
+                              SelectionChanged="PromptSelector_SelectionChanged" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Saved prompt" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Pick a saved prompt to edit it below."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Button x:Name="SavePromptButton" Content="Save" Width="72"
+                                Style="{DynamicResource HandyPrimaryButton}"
+                                ToolTip="Save the editor text under this name (updates the prompt if it exists)"
+                                Click="SavePromptButton_Click" />
+                        <Button x:Name="DeletePromptButton" Content="Delete" Width="72" Margin="8,0,0,0"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                ToolTip="Delete the selected saved prompt"
+                                Click="DeletePromptButton_Click" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Name" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBox x:Name="PromptNameBox" Margin="0,4,0,0" MinWidth="200"
+                                 Style="{DynamicResource HandyTextBox}"
+                                 ToolTip="Prompt name (max 60 chars)" />
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock Text="Active prompt text (max 2000 chars, blank to disable)"
                            FontWeight="SemiBold" FontSize="13"
                            Foreground="{DynamicResource HandyText}" />
                 <TextBox x:Name="PromptBox" Margin="0,4,0,4" MinHeight="100"

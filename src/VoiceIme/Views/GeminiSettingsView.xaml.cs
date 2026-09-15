@@ -11,11 +11,14 @@ namespace VoiceIme.Views;
 /// Gemini section screen (Handy post-processing API group port): Handy's
 /// provider/model pickers are replaced by our fixed Gemini fields — stacked
 /// Base URL, API keys (mono, one per line), and Model with reset-to-defaults
-/// — plus the custom-prompt group (multi-line editor, char-count hint, tip).
+/// — plus the prompt-library group (picker, name field, Save/Delete, the
+/// multi-line editor for the ACTIVE prompt's text, char-count hint, tip).
 /// The Test button sends the 440 Hz tone through <see cref="LlmClient"/> and
 /// shows the result inline. Viewmodel-less code-behind bound to
 /// <see cref="SettingsStore"/> — every write validates-then-commits and
-/// surfaces failures inline, never throws out of an event handler.
+/// surfaces failures inline, never throws out of an event handler. The
+/// library logic lives in the Prompts partial; this file keeps the
+/// connection fields plus the plain Save/Test plumbing.
 /// Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.Gemini, view).
 /// </summary>
@@ -74,7 +77,11 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         set => ModelBox.Text = value;
     }
 
-    /// <summary>Test seam: custom prompt editor text (setting it refreshes the hint).</summary>
+    /// <summary>
+    /// Test seam: active-prompt editor text (setting it refreshes the hint).
+    /// Reads/writes the editor box only — use SaveNow/SavePrompt/SelectPrompt
+    /// to commit it into the library.
+    /// </summary>
     internal string PromptText
     {
         get => PromptBox.Text;
@@ -103,17 +110,25 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         BaseUrlBox.Text = _settings.BaseUrl;
         KeysBox.Text = string.Join('\n', _settings.ApiKeys);
         ModelBox.Text = _settings.Model;
-        PromptBox.Text = _settings.CustomPrompt;
+        RefreshPromptList();
+        PromptNameBox.Text = _settings.ActivePrompt;
+        PromptBox.Text = _settings.ActivePromptText;
         UpdatePromptHint();
     }
 
     private void ResetButton_Click(object sender, RoutedEventArgs e)
     {
         // Keys have no meaningful default and wiping them would lock the user
-        // out — only Base URL, model, and prompt reset.
+        // out — only Base URL, model, and prompt reset. Reset clears the
+        // library too (SaveNow reseeds Default from the cleared editor when
+        // the user actually had text — a branded default is not invented).
         var defaults = new SettingsStore();
         BaseUrlBox.Text = defaults.BaseUrl;
         ModelBox.Text = defaults.Model;
+        _settings.Prompts.Clear();
+        _settings.ActivePrompt = "";
+        _settings.CustomPrompt = defaults.CustomPrompt;
+        PromptNameBox.Text = "";
         PromptBox.Text = defaults.CustomPrompt;
         SaveNow();
     }
@@ -137,7 +152,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         _settings.BaseUrl = BaseUrlBox.Text.Trim();
         _settings.ApiKeys = SplitKeys(KeysBox.Text);
         _settings.Model = ModelBox.Text.Trim();
-        _settings.CustomPrompt = prompt;
+        CommitPromptText(prompt);
         try
         {
             _saver(_settings);
@@ -149,6 +164,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         }
 
         StatusText.Text = "Saved ✓";
+        RefreshPromptList();
         return true;
     }
 

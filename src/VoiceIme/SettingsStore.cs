@@ -95,6 +95,23 @@ public sealed class SettingsStore
     /// </summary>
     public string CancelHotkey { get; set; } = DefaultCancelHotkey;
 
+    // Task 7 (Handy parity gaps): prompt library. Same contract —
+    // additive, field-level defaults, coerce-don't-throw, no version bump.
+    // CustomPrompt stays as the legacy mirror: after every load/save it holds
+    // the active prompt's text, so pre-library code (and anything reading the
+    // file) keeps seeing the current text. The library owns the text —
+    // ActivePromptText is the backend's single source.
+    public List<PromptEntry> Prompts { get; set; } = [];
+    public string ActivePrompt { get; set; } = "";
+
+    /// <summary>
+    /// The text the backend sends: the active library entry's text, falling
+    /// back to the legacy field when nothing matches (e.g. a store built
+    /// entirely by hand with prompts still empty). Never throws.
+    /// </summary>
+    public string ActivePromptText =>
+        PromptLibrary.GetActiveText(Prompts, ActivePrompt, CustomPrompt);
+
     /// <summary>
     /// Non-fatal problems from the last <see cref="Load"/> (corrupt file,
     /// bad enum string, undecryptable keys, unknown newer version). Empty on
@@ -177,6 +194,11 @@ public sealed class SettingsStore
         OutputDevice ??= "";
         Volume = ClampVolume(Volume);
         CancelHotkey = CoerceCancelHotkey(CancelHotkey, Warn);
+        Prompts = PromptLibrary.CoercePrompts(Prompts, Warn);
+        (Prompts, ActivePrompt) =
+            PromptLibrary.MigrateCustomPrompt(Prompts, ActivePrompt, CustomPrompt);
+        ActivePrompt = PromptLibrary.CoerceActivePrompt(ActivePrompt, Prompts, Warn);
+        CustomPrompt = ActivePromptText;
         if (KeyCursor < 0)
         {
             KeyCursor = 0;
@@ -198,6 +220,11 @@ public sealed class SettingsStore
         OutputDevice ??= "";
         Volume = ClampVolume(Volume);
         CancelHotkey = CoerceCancelHotkey(CancelHotkey);
+        Prompts = PromptLibrary.CoercePrompts(Prompts);
+        (Prompts, ActivePrompt) =
+            PromptLibrary.MigrateCustomPrompt(Prompts, ActivePrompt, CustomPrompt);
+        ActivePrompt = PromptLibrary.CoerceActivePrompt(ActivePrompt, Prompts);
+        CustomPrompt = ActivePromptText;
         SchemaVersion = CurrentSchemaVersion;
         var dir = Path.GetDirectoryName(SettingsPath)!;
         Directory.CreateDirectory(dir);
@@ -229,6 +256,8 @@ public sealed class SettingsStore
             volume = Volume,
             audioFeedback = AudioFeedback,
             cancelHotkey = CancelHotkey,
+            prompts = Prompts.Select(static p => new { name = p.Name, text = p.Text }).ToList(),
+            activePrompt = ActivePrompt,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
@@ -464,6 +493,13 @@ public sealed class SettingsStore
         Volume = ClampVolume(GetInt(root, "volume", Volume));
         AudioFeedback = GetBool(root, "audioFeedback", AudioFeedback);
         CancelHotkey = CoerceCancelHotkey(GetString(root, "cancelHotkey", DefaultCancelHotkey), Warn);
+        var readPrompts = PromptLibrary.ReadPrompts(root, Warn);
+        if (root.TryGetProperty("prompts", out _))
+        {
+            Prompts = readPrompts;
+        }
+
+        ActivePrompt = GetString(root, "activePrompt", ActivePrompt);
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
         // already read above.
@@ -620,6 +656,16 @@ public sealed class SettingsStore
         if (cancelHotkey is not null)
         {
             CancelHotkey = CoerceCancelHotkey(cancelHotkey, Warn);
+        }
+
+        // Task 7: the prompts array is not regex-salvageable (objects don't
+        // survive a truncated-file scan reliably), so only the active name
+        // salvages here. A salvaged legacy customPrompt still reseeds the
+        // Default entry through Migrate — the common pre-library case works.
+        var activePrompt = SalvageString(raw, "activePrompt");
+        if (activePrompt is not null)
+        {
+            ActivePrompt = activePrompt;
         }
 
         var version = SalvageInt(raw, "schemaVersion");
