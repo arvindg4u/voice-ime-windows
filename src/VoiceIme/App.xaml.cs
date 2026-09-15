@@ -359,7 +359,7 @@ public partial class App : System.Windows.Application
         {
             (transcript, usedIndex) = await _llm.TranscribeAsync(
                 wav, _settings.ApiKeys, _settings.BaseUrl, _settings.Model,
-                _settings.KeyCursor, _settings.ActivePromptText, ct: token);
+                _settings.KeyCursor, _settings.ActivePromptText, _settings.SmartMode, ct: token);
             token.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)

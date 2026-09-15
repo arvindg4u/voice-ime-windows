@@ -113,7 +113,7 @@ public sealed class GeminiSettingsViewTests
 
             Assert.StartsWith("Test OK — transcript:", view.StatusMessage, StringComparison.Ordinal);
             Assert.Contains("hello", view.StatusMessage, StringComparison.Ordinal);
-        }, transcribeAsync: (_, _, _, _, _) => Task.FromResult(("hello", 0)));
+        }, transcribeAsync: (_, _, _, _, _, _) => Task.FromResult(("hello", 0)));
     }
 
     [Fact]
@@ -125,7 +125,26 @@ public sealed class GeminiSettingsViewTests
 
             Assert.StartsWith("Test failed:", view.StatusMessage, StringComparison.Ordinal);
             Assert.Contains("boom", view.StatusMessage, StringComparison.Ordinal);
-        }, transcribeAsync: (_, _, _, _, _) => Task.FromException<(string, int)>(new TranscribeException("boom")));
+        }, transcribeAsync: (_, _, _, _, _, _) => Task.FromException<(string, int)>(new TranscribeException("boom")));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TestNowAsync_PassesStoredSmartModeToPipeline(bool smartMode)
+    {
+        var store = new SettingsStore();
+        bool? received = null;
+        TryRunOnSta(store, view =>
+        {
+            store.SmartMode = smartMode;
+            view.TestNowAsync().GetAwaiter().GetResult();
+            Assert.Equal(smartMode, received);
+        }, transcribeAsync: (_, _, _, _, _, smart) =>
+        {
+            received = smart;
+            return Task.FromResult(("hello", 0));
+        });
     }
 
     [Fact]
@@ -522,7 +541,7 @@ public sealed class GeminiSettingsViewTests
 
             Assert.StartsWith("Test OK — transcript:", view.StatusMessage, StringComparison.Ordinal);
             Assert.Equal("active text", sentPrompt);
-        }, transcribeAsync: (_, _, _, _, prompt) =>
+        }, transcribeAsync: (_, _, _, _, prompt, _) =>
         {
             sentPrompt = prompt;
             return Task.FromResult(("hello", 0));
@@ -587,7 +606,7 @@ public sealed class GeminiSettingsViewTests
         SettingsStore store,
         Action<GeminiSettingsView> body,
         Action<SettingsStore>? saver = null,
-        Func<byte[], IReadOnlyList<string>, string, string, string, Task<(string Transcript, int UsedIndex)>>? transcribeAsync = null)
+        Func<byte[], IReadOnlyList<string>, string, string, string, bool, Task<(string Transcript, int UsedIndex)>>? transcribeAsync = null)
     {
         StaTestHelper.TryRunOnSta(() =>
         {
@@ -595,7 +614,7 @@ public sealed class GeminiSettingsViewTests
                 store,
                 saver ?? (_ => { }),
                 recordTone: () => Array.Empty<byte>(),
-                transcribeAsync: transcribeAsync ?? ((_, _, _, _, _) => Task.FromResult(("", 0))));
+                transcribeAsync: transcribeAsync ?? ((_, _, _, _, _, _) => Task.FromResult(("", 0))));
             body(view);
         });
     }
