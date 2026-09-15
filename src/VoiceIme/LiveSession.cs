@@ -80,6 +80,21 @@ internal sealed class LiveSession : IAsyncDisposable
         _options = options ?? LiveSessionOptions.Default;
     }
 
+    /// <summary>
+    /// Raised synchronously on the socket-reader path for each interim
+    /// hypothesis preview (replace semantics — latest only, never
+    /// accumulated). Callers marshal to the UI thread; listener exceptions
+    /// are swallowed so the reader never throws. No-op when unsubscribed.
+    /// </summary>
+    internal event Action<string>? InterimReceived;
+
+    /// <summary>
+    /// Raised synchronously on the socket-reader path for each non-empty
+    /// final delta after it reaches the accumulator. Listener exceptions are
+    /// swallowed so the reader never throws. No-op when unsubscribed.
+    /// </summary>
+    internal event Action<string>? FinalReceived;
+
     internal async Task<LiveAttemptOutcome> RunAsync(byte[] pcm, Uri uri, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(pcm);
@@ -464,11 +479,16 @@ internal sealed class LiveSession : IAsyncDisposable
                         return new LiveAttemptOutcome.Done(snapshot);
                     continue;
                 }
+                // Interim hypothesis preview: latest only, never accumulated.
+                // HasLiveFinalTranscript was false above, so ParseLive... yields
+                // at most the interim text; unknown frames yield empty (no raise).
+                // Raised before the turnComplete check so a preview sharing the
+                // turn-end frame still reaches listeners. Interim never reaches
+                // the accumulator, so no final is fabricated from it.
+                foreach (var preview in LiveProtocol.ParseLiveInputTranscripts(message))
+                    RaiseQuietly(InterimReceived, preview);
                 if (LiveProtocol.IsLiveTurnComplete(message))
                     return SnapshotOrEmpty(accumulator);
-                // Interim hypotheses and anything else are ignored: interim only
-                // ever describes the in-progress turn and never reaches the
-                // accumulator, so no final is fabricated from it.
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -479,12 +499,37 @@ internal sealed class LiveSession : IAsyncDisposable
         }
     }
 
-    private static bool AppendFinals(FinalAccumulator accumulator, string message)
+    private bool AppendFinals(FinalAccumulator accumulator, string message)
     {
         var advanced = false;
         foreach (var fragment in LiveProtocol.ParseLiveInputTranscripts(message))
-            advanced |= accumulator.Append(fragment).Length > 0;
+        {
+            var delta = accumulator.Append(fragment);
+            if (delta.Length == 0)
+                continue;
+            advanced = true;
+            RaiseQuietly(FinalReceived, delta);
+        }
         return advanced;
+    }
+
+    /// <summary>
+    /// Invokes a transcript listener without ever throwing: a null event is a
+    /// no-op and listener exceptions are swallowed, matching Android's
+    /// try { onFinal } catch around its UI callbacks.
+    /// </summary>
+    private static void RaiseQuietly(Action<string>? listeners, string text)
+    {
+        if (listeners is null)
+            return;
+        try
+        {
+            listeners(text);
+        }
+        catch
+        {
+            // Listener failure must never break the socket-reader path.
+        }
     }
 
     private static LiveAttemptOutcome SnapshotOrEmpty(FinalAccumulator accumulator)

@@ -15,6 +15,11 @@ namespace VoiceIme;
 /// </summary>
 public sealed class LiveTranscriptionTransport : ITranscriptionTransport
 {
+    private const string NetworkError = "Network error — check connection";
+    private const string TimedOut = "Timed out — try again";
+    private const string Failed = "Transcription failed — try again";
+    private const string RotateSignal = "Rate limited";
+
     private readonly string _baseUrl;
     private readonly LiveSessionGuard _guard;
     private readonly ILiveSocketFactory _sockets;
@@ -69,4 +74,62 @@ public sealed class LiveTranscriptionTransport : ITranscriptionTransport
         }
         throw new TranscribeException("Rate limited on all keys — retry later");
     }
+
+    /// <summary>
+    /// Streaming attempt on ONE key (the caller owns rotation/cursor):
+    /// connects, streams pump chunks as they arrive, finalizes on pump
+    /// completion. Setup-phase failure reports <c>TimedOut</c>: setup timeouts
+    /// are dominated by ACK timeouts; a close-before-ACK is a rare transport
+    /// drop where either safe message is acceptable. Chunk send failure maps
+    /// the rotate signal to <c>Rotate</c> and anything else to a network
+    /// <c>Fail</c>; drain cancellation surfaces as
+    /// <see cref="OperationCanceledException"/> unwrapped. The finalize
+    /// outcome passes through verbatim. No logging; all failure messages are
+    /// fixed user-safe strings.
+    /// </summary>
+    internal async Task<LiveAttemptOutcome> TranscribeStreamingAsync(
+        string model,
+        bool smartMode,
+        string baseUrl,
+        string apiKey,
+        LivePcmPump pump,
+        LiveSessionGuard guard,
+        CancellationToken ct,
+        LiveSessionOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(baseUrl);
+        ArgumentNullException.ThrowIfNull(apiKey);
+        ArgumentNullException.ThrowIfNull(pump);
+        ArgumentNullException.ThrowIfNull(guard);
+
+        try
+        {
+            var uri = LiveProtocol.BuildLiveUri(LiveProtocol.LiveHost(baseUrl), apiKey);
+            await using var session = new LiveSession(_sockets.Create(), model, smartMode, guard, guard.Next(), options);
+            if (!await session.ConnectAndSetupAsync(uri, ct).ConfigureAwait(false))
+                return new LiveAttemptOutcome.Fail(TimedOut, null);
+
+            try
+            {
+                await pump.DrainAsync(session.SendPcmAsync, ct).ConfigureAwait(false);
+            }
+            catch (LiveSocketException ex)
+            {
+                return IsRotateSignal(ex)
+                    ? new LiveAttemptOutcome.Rotate()
+                    : new LiveAttemptOutcome.Fail(NetworkError, ex);
+            }
+
+            return await session.CompleteAndReadFinalAsync(ct).ConfigureAwait(false);
+        }
+        catch (TransportFallbackException ex)
+        {
+            // Safety net: no Live code throws this, so collapse it to a safe failure.
+            return new LiveAttemptOutcome.Fail(Failed, ex);
+        }
+    }
+
+    private static bool IsRotateSignal(LiveSocketException ex) =>
+        ex.Message.Contains(RotateSignal, StringComparison.Ordinal);
 }
