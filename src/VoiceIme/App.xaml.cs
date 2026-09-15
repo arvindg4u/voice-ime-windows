@@ -586,9 +586,8 @@ public partial class App : System.Windows.Application
             dynamic shortcut = shell.CreateShortcut(shortcutPath);
             try
             {
-                shortcut.TargetPath = Environment.ProcessPath
-                    ?? System.Reflection.Assembly.GetEntryAssembly()?.Location
-                    ?? string.Empty;
+                shortcut.TargetPath = StartupShell.ExePathForShortcut(
+                    Environment.ProcessPath, AppContext.BaseDirectory);
                 shortcut.WorkingDirectory = AppContext.BaseDirectory;
                 shortcut.Description = "Voice IME — launch to the tray at sign-in";
                 shortcut.Save();

@@ -42,4 +42,30 @@ public sealed class StartupShellTests
     {
         Assert.Equal(expected, StartupShell.DecideReconcile(autostart, shortcutExists));
     }
+
+    [Fact]
+    public void ExePathForShortcut_ProcessPath_Wins()
+    {
+        Assert.Equal(
+            @"C:\app\VoiceIme.exe",
+            StartupShell.ExePathForShortcut(@"C:\app\VoiceIme.exe", @"C:\other"));
+    }
+
+    [Fact]
+    public void ExePathForShortcut_BlankProcessPath_FallsBackToBaseDir()
+    {
+        Assert.Equal(
+            Path.Combine("base", StartupShell.ExeFileName),
+            StartupShell.ExePathForShortcut("   ", "base"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ExePathForShortcut_BlankBaseDir_Throws(string? baseDir)
+    {
+        Assert.Throws<ArgumentException>(
+            () => StartupShell.ExePathForShortcut(null, baseDir!));
+    }
 }

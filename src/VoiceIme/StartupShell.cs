@@ -21,6 +21,28 @@ public enum StartupAction
 public static class StartupShell
 {
     public const string ShortcutFileName = "Voice IME.lnk";
+    public const string ExeFileName = "VoiceIme.exe";
+
+    /// <summary>
+    /// EXE path for the logon shortcut. Prefers the running process path;
+    /// falls back to the app directory plus the known EXE name. Pure and
+    /// unit-testable — and it keeps the single-file-incompatible
+    /// <c>Assembly.Location</c> fallback out of App (IL3000).
+    /// </summary>
+    public static string ExePathForShortcut(string? processPath, string baseDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(processPath))
+        {
+            return processPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(baseDirectory))
+        {
+            throw new ArgumentException("Base directory must not be blank.", nameof(baseDirectory));
+        }
+
+        return Path.Combine(baseDirectory, ExeFileName);
+    }
 
     /// <summary>
     /// Full path of the logon shortcut inside a Startup folder. The folder is

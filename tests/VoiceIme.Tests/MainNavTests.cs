@@ -49,4 +49,13 @@ public sealed class MainNavTests
         Assert.All(icons, i => Assert.False(string.IsNullOrWhiteSpace(i)));
         Assert.Equal(icons.Length, icons.Distinct().Count());
     }
+
+    [Fact]
+    public void UnknownSection_FallsBackWithoutThrowing()
+    {
+        var unknown = (MainSection)99;
+
+        Assert.Equal("99", MainNav.LabelFor(unknown));
+        Assert.Equal("❓", MainNav.IconFor(unknown));
+    }
 }

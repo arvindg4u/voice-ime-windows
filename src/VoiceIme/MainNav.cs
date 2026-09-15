@@ -25,6 +25,10 @@ public static class MainNav
         MainSection.Gemini => "Gemini",
         MainSection.Advanced => "Advanced",
         MainSection.About => "About",
+        // Unnamed enum values (e.g. a stale cast) fall back to the raw name
+        // instead of throwing — same coerce-don't-throw discipline as the
+        // string LabelFor helpers. Silences CS8524.
+        _ => section.ToString(),
     };
 
     public static string IconFor(MainSection section) => section switch
@@ -34,5 +38,6 @@ public static class MainNav
         MainSection.Gemini => "✨",
         MainSection.Advanced => "🔧",
         MainSection.About => "ℹ️",
+        _ => "❓",
     };
 }
