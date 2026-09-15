@@ -78,6 +78,55 @@ public sealed class MainWindowTests
         }
     }
 
+    [Fact]
+    public void Close_DefaultGuard_HidesToTray()
+    {
+        if (!TryRunOnSta(window =>
+        {
+            window.Show();
+            window.Close();
+
+            Assert.False(window.IsVisible);
+        }))
+        {
+            return;
+        }
+    }
+
+    [Fact]
+    public void Close_GuardRefusesHide_StaysVisible()
+    {
+        if (!TryRunOnSta(window =>
+        {
+            window.CanHideWindow = () => false;
+            window.Show();
+            window.Close();
+
+            // Close-to-tray cancelled AND hide skipped: with the tray icon
+            // off this is the only visible surface, so it must stay up.
+            Assert.True(window.IsVisible);
+        }))
+        {
+            return;
+        }
+    }
+
+    [Fact]
+    public void Close_GuardThrows_StaysVisible()
+    {
+        if (!TryRunOnSta(window =>
+        {
+            window.CanHideWindow = () => throw new InvalidOperationException("guard blew up");
+            window.Show();
+            window.Close();
+
+            Assert.True(window.IsVisible);
+        }))
+        {
+            return;
+        }
+    }
+
     /// <summary>
     /// Runs the body on an STA thread with a fresh MainWindow. Returns false
     /// when no window station is available (headless); rethrows body failures.

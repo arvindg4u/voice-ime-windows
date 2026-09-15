@@ -161,6 +161,15 @@ public partial class MainWindow : Window
     /// </summary>
     internal void PermitClose() => _permitClose = true;
 
+    /// <summary>
+    /// Guard consulted before a close-to-tray hide: when it returns false the
+    /// close is cancelled and the window stays visible. App wires it to the
+    /// live <c>ShowTrayIcon</c> setting — hiding with the icon off would
+    /// strand the app invisible (no icon, no window). Null (tests, legacy
+    /// construction) means hide freely, preserving prior behavior.
+    /// </summary>
+    internal Func<bool>? CanHideWindow { get; set; }
+
     /// <summary>Test seam: the sidebar button backing a section.</summary>
     internal System.Windows.Controls.Button NavButtonFor(MainSection section) => _navButtons[section];
 
@@ -168,8 +177,24 @@ public partial class MainWindow : Window
     {
         if (!_permitClose)
         {
+            // Tray-guard: with the icon off, hiding strands the app invisible
+            // (no icon, no window) — cancel the close and stay visible. Guard
+            // exceptions fail closed (stay visible) rather than strand.
+            bool canHide = true;
+            try
+            {
+                canHide = CanHideWindow?.Invoke() != false;
+            }
+            catch
+            {
+                canHide = false;
+            }
+
             e.Cancel = true;
-            Hide();
+            if (canHide)
+            {
+                Hide();
+            }
         }
 
         base.OnClosing(e);

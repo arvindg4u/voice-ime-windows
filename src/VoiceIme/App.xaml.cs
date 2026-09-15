@@ -786,12 +786,17 @@ public partial class App : System.Windows.Application
         ArgumentNullException.ThrowIfNull(clips);
         ArgumentNullException.ThrowIfNull(registrar);
         ArgumentNullException.ThrowIfNull(listMicrophones);
-        return new(
+        var window = new MainWindow(
             () => new Views.GeneralSettingsView(settings, registrar, listMicrophones),
             () => new Views.GeminiSettingsView(settings),
             () => new Views.HistorySettingsView(clips),
             () => new Views.AdvancedSettingsView(settings),
             () => new Views.AboutSettingsView(settings));
+        // Close-to-tray guard: hiding with the icon off strands the app
+        // invisible (Task 8 review HIGH). Reads the live store so toggling
+        // the setting later takes effect without rebuilding the shell.
+        window.CanHideWindow = () => settings.ShowTrayIcon;
+        return window;
     }
 
     /// <summary>

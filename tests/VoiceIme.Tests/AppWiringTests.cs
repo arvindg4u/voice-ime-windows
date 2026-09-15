@@ -120,6 +120,32 @@ public sealed class AppWiringTests : IDisposable
     }
 
     [Fact]
+    public void CreateMainWindow_WiresCloseGuardToLiveTraySetting()
+    {
+        TryRunOnSta(() =>
+        {
+            var settings = new SettingsStore();
+            var clips = new ClipboardStore(PathFor("guard.json"));
+            var window = App.CreateMainWindow(
+                settings, clips, new NullHotkeyRegistrar(), () => Array.Empty<string>());
+            try
+            {
+                // Guard follows the live store: icon on → hide allowed.
+                Assert.True(window.CanHideWindow?.Invoke());
+
+                settings.ShowTrayIcon = false;
+
+                // Icon off → hide refused (close-to-tray would strand invisible).
+                Assert.False(window.CanHideWindow?.Invoke());
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void GeneralViewSave_MutatesLiveSettings_AndRaisesSavedForTrayRefresh()
     {
         TryRunOnSta(() =>
