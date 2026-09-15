@@ -77,7 +77,18 @@ public partial class GeneralSettingsView
     {
         _settings.Channel = AudioChannels.ChannelForLabel(label);
         TrySaveSettings(out _);
-        ChannelBox.SelectedItem = AudioChannels.LabelFor(_settings.Channel);
+        // Detach while re-syncing: setting SelectedItem to a different value
+        // re-fires SelectionChanged → ApplyChannel → a second save. Same
+        // detach pattern as RefreshSoundGroup/RefreshOutputList.
+        ChannelBox.SelectionChanged -= ChannelBox_SelectionChanged;
+        try
+        {
+            ChannelBox.SelectedItem = AudioChannels.LabelFor(_settings.Channel);
+        }
+        finally
+        {
+            ChannelBox.SelectionChanged += ChannelBox_SelectionChanged;
+        }
     }
 
     private void RefreshOutputButton_Click(object sender, RoutedEventArgs e) => RefreshOutputList();
@@ -175,5 +186,8 @@ public partial class GeneralSettingsView
     {
         _settings.AudioFeedback = enabled;
         TrySaveSettings(out _);
+        // Sync the toggle: siblings ApplyChannel/ApplyVolume re-sync their
+        // controls, and FeedbackChecked reads IsChecked directly.
+        FeedbackCheck.IsChecked = enabled;
     }
 }

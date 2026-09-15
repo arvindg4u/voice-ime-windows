@@ -82,9 +82,23 @@ public partial class AboutSettingsView : System.Windows.Controls.UserControl
 
     /// <summary>
     /// Test seam: drives a language selection through the persist path
-    /// the way a user pick does.
+    /// the way a user pick does. Persists unconditionally (not via the
+    /// SelectionChanged event) because the v1 English-only catalog holds a
+    /// single item — re-selecting it fires no event, so event-gated saving
+    /// would silently skip the write.
     /// </summary>
-    internal void SelectLanguageLabel(string label) => LanguageBox.SelectedItem = label;
+    internal void SelectLanguageLabel(string label) => ApplyLanguage(label);
+
+    /// <summary>
+    /// Shared persist path for the seam and the dropdown handler:
+    /// validate-then-commit, then re-sync the box.
+    /// </summary>
+    internal void ApplyLanguage(string? label)
+    {
+        _settings.Language = AppLanguages.LanguageForLabel(label);
+        TrySaveSettings();
+        LanguageBox.SelectedItem = AppLanguages.LabelFor(_settings.Language);
+    }
 
     private void LoadFromSettings()
     {
@@ -136,8 +150,7 @@ public partial class AboutSettingsView : System.Windows.Controls.UserControl
             return;
         }
 
-        _settings.Language = AppLanguages.LanguageForLabel(LanguageBox.SelectedItem as string);
-        TrySaveSettings();
+        ApplyLanguage(LanguageBox.SelectedItem as string);
     }
 
     private void AppDataButton_Click(object sender, RoutedEventArgs e) =>

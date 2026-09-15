@@ -99,8 +99,11 @@ public partial class AdvancedSettingsView : System.Windows.Controls.UserControl
         var trimmed = HistoryLimitBox.Text.Trim();
         if (!int.TryParse(trimmed, out var parsed))
         {
-            ShowHistoryLimitError($"\"{trimmed}\" isn't a number — history limit stays {_settings.HistoryLimit}.");
+            // Reset the box BEFORE showing the error: assigning Text fires
+            // TextChanged synchronously, and the handler clears a stale error
+            // once the text parses — doing it after would erase this error.
             HistoryLimitBox.Text = _settings.HistoryLimit.ToString();
+            ShowHistoryLimitError($"\"{trimmed}\" isn't a number — history limit stays {_settings.HistoryLimit}.");
             return false;
         }
 

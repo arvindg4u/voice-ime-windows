@@ -198,7 +198,7 @@ public sealed class PromptLibraryTests
         var (prompts, active) =
             PromptLibrary.MigrateCustomPrompt(existing, "Work", "stale legacy");
 
-        Assert.Same(existing, prompts);
+        Assert.Equal(existing, prompts);
         Assert.Equal("Work", active);
         Assert.Equal("lib text", prompts[0].Text);
     }

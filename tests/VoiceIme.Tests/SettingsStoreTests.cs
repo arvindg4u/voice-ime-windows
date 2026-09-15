@@ -1109,8 +1109,14 @@ public sealed class SettingsStoreTests
         {
             var longName = new string('n', 61);
             var longText = new string('x', 2001);
-            File.WriteAllText(path,
-                """"{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"prompts":[{"name":"" + longName + "","text":"" + longText + ""},{"name":"Work","text":"kept"},{"name":"work","text":"dup"},{"nope":1},"stray"],"activePrompt":"Ghost"}"""");
+            // Escaped (not raw) string: every \" is one runtime quote and the
+            // overlong values interpolate as real variables. A raw string
+            // would need 5-quote runs at each junction and misreads easily.
+            var payload = "{\"baseUrl\":\"https://example.invalid\",\"model\":\"m\",\"customPrompt\":\"\",\"keyCursor\":0,"
+                + "\"prompts\":[{\"name\":\"" + longName + "\",\"text\":\"" + longText + "\"},"
+                + "{\"name\":\"Work\",\"text\":\"kept\"},{\"name\":\"work\",\"text\":\"dup\"},{\"nope\":1},\"stray\"],"
+                + "\"activePrompt\":\"Ghost\"}";
+            File.WriteAllText(path, payload);
 
             var loaded = SettingsStore.Load();
 

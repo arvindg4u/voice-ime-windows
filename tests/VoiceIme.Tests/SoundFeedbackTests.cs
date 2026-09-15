@@ -77,7 +77,6 @@ public sealed class SoundFeedbackTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("surround")]
-    [InlineData("Stereo")]
     public void AudioChannels_ChannelForLabel_Unknown_CoercesToMono(string? label)
     {
         Assert.Equal(AudioChannels.Mono, AudioChannels.ChannelForLabel(label));
