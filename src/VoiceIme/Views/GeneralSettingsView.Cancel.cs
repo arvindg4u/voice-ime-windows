@@ -48,7 +48,7 @@ public partial class GeneralSettingsView
         StartCapture(CaptureTarget.Cancel);
     }
 
-    private void CancelHotkeyChip_KeyDown(object sender, KeyEventArgs e)
+    private void CancelHotkeyChip_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (!_capturing && (e.Key == Key.Enter || e.Key == Key.Space))
         {

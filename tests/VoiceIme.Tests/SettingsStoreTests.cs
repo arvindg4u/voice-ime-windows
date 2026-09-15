@@ -1110,7 +1110,7 @@ public sealed class SettingsStoreTests
             var longName = new string('n', 61);
             var longText = new string('x', 2001);
             File.WriteAllText(path,
-                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"prompts":[{"name":"""" + longName + """","text":"""" + longText + """},{"name":"Work","text":"kept"},{"name":"work","text":"dup"},{"nope":1},"stray"],"activePrompt":"Ghost"}""");
+                """"{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"prompts":[{"name":"" + longName + "","text":"" + longText + ""},{"name":"Work","text":"kept"},{"name":"work","text":"dup"},{"nope":1},"stray"],"activePrompt":"Ghost"}"""");
 
             var loaded = SettingsStore.Load();
 
