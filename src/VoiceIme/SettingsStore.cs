@@ -67,6 +67,34 @@ public sealed class SettingsStore
     public string Theme { get; set; } = AppThemes.System;
     public string Language { get; set; } = AppLanguages.English;
 
+    // Task 6 (Handy parity gaps): Sound atoms + cancel key. Same contract —
+    // additive, field-level defaults, coerce-don't-throw, no version bump.
+    public const string DefaultCancelHotkey = "Esc";
+    public const int MinVolume = 0;
+    public const int MaxVolume = 100;
+    public const int DefaultVolume = 100;
+
+    /// <summary>Capture-channel choice ("mono"/"stereo"/"average").</summary>
+    public string Channel { get; set; } = AudioChannels.Mono;
+
+    /// <summary>Output device name, or "" for the system default.</summary>
+    public string OutputDevice { get; set; } = "";
+
+    /// <summary>
+    /// Display gain for the level meter (0–100). Scales the overlay waveform
+    /// only — never capture gain.
+    /// </summary>
+    public int Volume { get; set; } = DefaultVolume;
+
+    /// <summary>When true, plays the 440 Hz tone locally after a successful paste.</summary>
+    public bool AudioFeedback { get; set; }
+
+    /// <summary>
+    /// Bare "Esc" by default (armed only while busy — see HotkeyChord), or a
+    /// full global chord. Coerced with <see cref="HotkeyChord.TryParseWithBareKey"/>.
+    /// </summary>
+    public string CancelHotkey { get; set; } = DefaultCancelHotkey;
+
     /// <summary>
     /// Non-fatal problems from the last <see cref="Load"/> (corrupt file,
     /// bad enum string, undecryptable keys, unknown newer version). Empty on
@@ -145,6 +173,10 @@ public sealed class SettingsStore
         HistoryLimit = ClampHistoryLimit(HistoryLimit);
         Theme = CoerceTheme(Theme, Warn);
         Language = CoerceLanguage(Language, Warn);
+        Channel = CoerceChannel(Channel, Warn);
+        OutputDevice ??= "";
+        Volume = ClampVolume(Volume);
+        CancelHotkey = CoerceCancelHotkey(CancelHotkey, Warn);
         if (KeyCursor < 0)
         {
             KeyCursor = 0;
@@ -162,6 +194,10 @@ public sealed class SettingsStore
         HistoryLimit = ClampHistoryLimit(HistoryLimit);
         Theme = CoerceTheme(Theme);
         Language = CoerceLanguage(Language);
+        Channel = CoerceChannel(Channel);
+        OutputDevice ??= "";
+        Volume = ClampVolume(Volume);
+        CancelHotkey = CoerceCancelHotkey(CancelHotkey);
         SchemaVersion = CurrentSchemaVersion;
         var dir = Path.GetDirectoryName(SettingsPath)!;
         Directory.CreateDirectory(dir);
@@ -188,6 +224,11 @@ public sealed class SettingsStore
             historyLimit = HistoryLimit,
             theme = Theme,
             language = Language,
+            channel = Channel,
+            outputDevice = OutputDevice,
+            volume = Volume,
+            audioFeedback = AudioFeedback,
+            cancelHotkey = CancelHotkey,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
@@ -308,6 +349,69 @@ public sealed class SettingsStore
     internal static int ClampHistoryLimit(int value) =>
         Math.Clamp(value, MinHistoryLimit, MaxHistoryLimit);
 
+    /// <summary>
+    /// Display-gain clamp: 0 silences the meter, 100 is full scale. Pure
+    /// range check — no warnings, same contract as
+    /// <see cref="ClampHistoryLimit"/>.
+    /// </summary>
+    internal static int ClampVolume(int value) =>
+        Math.Clamp(value, MinVolume, MaxVolume);
+
+    /// <summary>
+    /// Bad channel strings fall back to mono (warns via the same
+    /// coerce-don't-throw contract). The recorder behaves as today — this
+    /// screen only persists the choice.
+    /// </summary>
+    internal static string CoerceChannel(string? value) => CoerceChannel(value, null);
+
+    internal static string CoerceChannel(string? value, Action<string>? onWarning)
+    {
+        if (AudioChannels.IsValid(value))
+        {
+            return value!;
+        }
+
+        var message = $"Invalid channel {value ?? "<null>"} — using default {AudioChannels.Mono}.";
+        if (onWarning is not null)
+        {
+            onWarning(message);
+        }
+        else
+        {
+            System.Diagnostics.Trace.WriteLine("[Settings] " + message);
+        }
+
+        return AudioChannels.Mono;
+    }
+
+    /// <summary>
+    /// Bad cancel-key strings fall back to Esc. Accepts a bare key ("Esc") or
+    /// a full modifier+key chord — a bare key can only arm dynamically while
+    /// busy (never as the always-on dictation hotkey).
+    /// </summary>
+    internal static string CoerceCancelHotkey(string? value) => CoerceCancelHotkey(value, null);
+
+    internal static string CoerceCancelHotkey(string? value, Action<string>? onWarning)
+    {
+        if (!string.IsNullOrWhiteSpace(value)
+            && HotkeyChord.TryParseWithBareKey(value, out _, out _))
+        {
+            return value.Trim();
+        }
+
+        var message = $"Invalid cancelHotkey {value ?? "<null>"} — using default {DefaultCancelHotkey}.";
+        if (onWarning is not null)
+        {
+            onWarning(message);
+        }
+        else
+        {
+            System.Diagnostics.Trace.WriteLine("[Settings] " + message);
+        }
+
+        return DefaultCancelHotkey;
+    }
+
     internal static string CoerceActivationMode(string? value) => CoerceActivationMode(value, null);
 
     internal static string CoerceActivationMode(string? value, Action<string>? onWarning)
@@ -355,6 +459,11 @@ public sealed class SettingsStore
         HistoryLimit = ClampHistoryLimit(GetInt(root, "historyLimit", HistoryLimit));
         Theme = CoerceTheme(GetString(root, "theme", AppThemes.System), Warn);
         Language = CoerceLanguage(GetString(root, "language", AppLanguages.English), Warn);
+        Channel = CoerceChannel(GetString(root, "channel", AudioChannels.Mono), Warn);
+        OutputDevice = GetString(root, "outputDevice", OutputDevice);
+        Volume = ClampVolume(GetInt(root, "volume", Volume));
+        AudioFeedback = GetBool(root, "audioFeedback", AudioFeedback);
+        CancelHotkey = CoerceCancelHotkey(GetString(root, "cancelHotkey", DefaultCancelHotkey), Warn);
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
         // already read above.
@@ -481,6 +590,36 @@ public sealed class SettingsStore
         if (language is not null)
         {
             Language = CoerceLanguage(language, Warn);
+        }
+
+        var channel = SalvageString(raw, "channel");
+        if (channel is not null)
+        {
+            Channel = CoerceChannel(channel, Warn);
+        }
+
+        var outputDevice = SalvageString(raw, "outputDevice");
+        if (outputDevice is not null)
+        {
+            OutputDevice = outputDevice;
+        }
+
+        var volume = SalvageInt(raw, "volume");
+        if (volume.HasValue)
+        {
+            Volume = ClampVolume(volume.Value);
+        }
+
+        var audioFeedback = SalvageBool(raw, "audioFeedback");
+        if (audioFeedback.HasValue)
+        {
+            AudioFeedback = audioFeedback.Value;
+        }
+
+        var cancelHotkey = SalvageString(raw, "cancelHotkey");
+        if (cancelHotkey is not null)
+        {
+            CancelHotkey = CoerceCancelHotkey(cancelHotkey, Warn);
         }
 
         var version = SalvageInt(raw, "schemaVersion");

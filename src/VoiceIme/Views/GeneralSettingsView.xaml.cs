@@ -12,11 +12,12 @@ namespace VoiceIme.Views;
 
 /// <summary>
 /// General section screen (Handy GeneralSettings port): dictation-hotkey
-/// capture chip, activation-mode dropdown, and the Sound group (microphone
-/// picker, mute toggle, speaker test). Viewmodel-less code-behind bound to
-/// <see cref="SettingsStore"/> — every write validates-then-commits and
-/// surfaces failures inline, never throws out of an event handler.
-/// Hosted by <see cref="MainWindow"/> via
+/// capture chip, activation-mode dropdown, the Sound group (microphone
+/// picker, mute toggle, speaker test, channel picker, output picker, volume
+/// slider, feedback toggle), and the cancel-key capture row. Viewmodel-less
+/// code-behind bound to <see cref="SettingsStore"/> — every write
+/// validates-then-commits and surfaces failures inline, never throws out of
+/// an event handler. Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.General, view).
 /// </summary>
 public partial class GeneralSettingsView : System.Windows.Controls.UserControl
@@ -25,6 +26,7 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
     private readonly SettingsStore _settings;
     private readonly Func<IReadOnlyList<string>> _listMicrophones;
+    private readonly Func<IReadOnlyList<string>> _listOutputDevices;
     private readonly Action<SettingsStore> _saver;
 
     /// <summary>
@@ -58,11 +60,13 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         SettingsStore settings,
         IHotkeyRegistrar registrar,
         Func<IReadOnlyList<string>> listMicrophones,
-        Action<SettingsStore>? saver = null)
+        Action<SettingsStore>? saver = null,
+        Func<IReadOnlyList<string>>? listOutputDevices = null)
     {
         _settings = settings;
         HotkeyRegistrar = registrar;
         _listMicrophones = listMicrophones;
+        _listOutputDevices = listOutputDevices ?? OutputDevices.ListNames;
         _saver = saver ?? (static s => s.Save());
         InitializeComponent();
         Unloaded += (_, _) => EndCaptureMode();
@@ -115,6 +119,8 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         RefreshMicrophoneList();
 
         MuteCheck.IsChecked = _settings.MuteWhileRecording;
+        RefreshSoundGroup();
+        RefreshCancelRow();
     }
 
     // Hotkey capture (Handy GlobalShortcutInput port).
@@ -122,7 +128,7 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
     private void HotkeyChip_Click(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        StartCapture();
+        StartCapture(CaptureTarget.Hotkey);
     }
 
     private void HotkeyChip_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -130,18 +136,27 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         if (!_capturing && (e.Key == Key.Enter || e.Key == Key.Space))
         {
             e.Handled = true;
-            StartCapture();
+            StartCapture(CaptureTarget.Hotkey);
         }
     }
 
-    private void StartCapture()
+    private void StartCapture(CaptureTarget target)
     {
         if (_capturing)
         {
             return;
         }
 
-        _previousChord = _settings.Hotkey;
+        _captureTarget = target;
+        if (target == CaptureTarget.Cancel)
+        {
+            _previousChord = _settings.CancelHotkey;
+        }
+        else
+        {
+            _previousChord = _settings.Hotkey;
+        }
+
         HotkeyRegistrar.Unregister();
         _capturing = true;
         _heldKeys.Clear();
@@ -156,9 +171,17 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
             _captureWindow.PreviewMouseLeftButtonDown += OnCaptureMouseDown;
         }
 
-        HotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyAccent");
-        HotkeyText.Text = "press keys…";
-        ClearHotkeyError();
+        if (target == CaptureTarget.Cancel)
+        {
+            CancelHotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyAccent");
+            BeginCancelCapture();
+        }
+        else
+        {
+            HotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyAccent");
+            HotkeyText.Text = "press keys…";
+            ClearHotkeyError();
+        }
     }
 
     private void OnCaptureKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -194,7 +217,14 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
             }
         }
 
-        HotkeyText.Text = FormatCapturePreview();
+        if (_captureTarget == CaptureTarget.Cancel)
+        {
+            CancelHotkeyText.Text = FormatCancelPreview();
+        }
+        else
+        {
+            HotkeyText.Text = FormatCapturePreview();
+        }
     }
 
     private void OnCaptureKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
@@ -220,13 +250,14 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
             return;
         }
 
-        // Click-outside cancels: clicks on the chip itself start/continue
+        // Click-outside cancels: clicks on either chip start/continue
         // capture and must not cancel it.
         for (var current = e.OriginalSource as DependencyObject;
             current is not null;
             current = VisualTreeHelper.GetParent(current))
         {
-            if (ReferenceEquals(current, HotkeyChip))
+            if (ReferenceEquals(current, HotkeyChip)
+                || ReferenceEquals(current, CancelHotkeyChip))
             {
                 return;
             }
@@ -240,6 +271,13 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         var mods = _captureMods;
         var vk = _captureVk;
         var previous = _previousChord;
+        var target = _captureTarget;
+        if (target == CaptureTarget.Cancel)
+        {
+            CommitCancelCapture(mods, vk);
+            return;
+        }
+
         EndCaptureMode();
         if (vk is null || mods == 0)
         {
@@ -254,12 +292,25 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
     private void CancelCapture()
     {
         var previous = _previousChord;
+        var target = _captureTarget;
+        // Capture suspends the LIVE DICTATION registration, so a cancelled
+        // cancel-capture must re-arm the dictation chord — never the cancel
+        // chord (a bare Esc would fail parse, kill dictation, and misreport).
+        var restore = target == CaptureTarget.Cancel ? _settings.Hotkey : previous;
         EndCaptureMode();
-        if (!HotkeyRegistrar.TryRegister(previous, out var error))
+        if (!HotkeyRegistrar.TryRegister(restore, out var error))
         {
-            ShowHotkeyError(string.IsNullOrEmpty(error)
-                ? $"Couldn't restore {previous} — restart the app to re-arm the hotkey."
-                : error);
+            var message = string.IsNullOrEmpty(error)
+                ? $"Couldn't restore {restore} — restart the app to re-arm the hotkey."
+                : error;
+            if (target == CaptureTarget.Cancel)
+            {
+                ShowCancelHotkeyError(message);
+            }
+            else
+            {
+                ShowHotkeyError(message);
+            }
         }
     }
 
@@ -281,7 +332,9 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
         _heldKeys.Clear();
         HotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyCardBorder");
+        CancelHotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyCardBorder");
         RefreshHotkeyChip();
+        RefreshCancelRow();
     }
 
     private void ResetHotkeyButton_Click(object sender, RoutedEventArgs e) =>
@@ -313,6 +366,20 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         }
 
         RefreshHotkeyChip();
+    }
+
+    private string FormatCancelPreview()
+    {
+        // Cancel accepts a bare key ("Esc") or a full chord: show the key as
+        // soon as it lands so single-key capture has live feedback.
+        if (_captureVk is uint cancelVk)
+        {
+            return _captureMods == 0
+                ? HotkeyChord.KeyName(cancelVk)
+                : HotkeyChord.Format(_captureMods, cancelVk);
+        }
+
+        return FormatCapturePreview();
     }
 
     private string FormatCapturePreview()
@@ -498,9 +565,9 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
     /// <summary>
     /// Raised after the view persists the shared <see cref="SettingsStore"/>
-    /// (hotkey commit, activation pick, microphone, mute). App observes it to
-    /// refresh tray chrome that is otherwise built once at startup. Not raised
-    /// on save failure.
+    /// (hotkey commit, activation pick, microphone, mute, channel, output,
+    /// volume, feedback, cancel-key). App observes it to refresh tray chrome
+    /// that is otherwise built once at startup. Not raised on save failure.
     /// </summary>
     internal event Action<SettingsStore>? Saved;
 }

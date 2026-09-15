@@ -311,6 +311,186 @@ public sealed class SettingsStoreTests
         }
     }
 
+    // Task 6 (Handy parity gaps): Sound atoms + cancel key. Additive
+    // fields — Load/Save round-trips carry them, old files default, bad
+    // values coerce, never throw.
+
+    [Theory]
+    [InlineData(-1000, 0)]
+    [InlineData(-1, 0)]
+    [InlineData(0, 0)]
+    [InlineData(50, 50)]
+    [InlineData(100, 100)]
+    [InlineData(101, 100)]
+    [InlineData(int.MaxValue, 100)]
+    public void ClampVolume_ClampsTo0To100(int value, int expected)
+    {
+        Assert.Equal(expected, SettingsStore.ClampVolume(value));
+    }
+
+    [Theory]
+    [InlineData("mono")]
+    [InlineData("stereo")]
+    [InlineData("average")]
+    public void CoerceChannel_Valid_KeepsValue(string value)
+    {
+        Assert.Equal(value, SettingsStore.CoerceChannel(value));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("surround")]
+    [InlineData("Stereo")]
+    public void CoerceChannel_Invalid_FallsBackToMono(string? value)
+    {
+        Assert.Equal(AudioChannels.Mono, SettingsStore.CoerceChannel(value));
+    }
+
+    [Theory]
+    [InlineData("Esc")]
+    [InlineData("esc")]
+    [InlineData("Escape")]
+    [InlineData("F5")]
+    [InlineData("Ctrl+Esc")]
+    [InlineData("Alt+F4")]
+    public void CoerceCancelHotkey_Valid_KeepsValue(string value)
+    {
+        Assert.Equal(value.Trim(), SettingsStore.CoerceCancelHotkey(value));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("bogus")]
+    [InlineData("Ctrl")]
+    [InlineData("Ctrl+Shift")]
+    public void CoerceCancelHotkey_Invalid_FallsBackToEsc(string? value)
+    {
+        Assert.Equal(SettingsStore.DefaultCancelHotkey, SettingsStore.CoerceCancelHotkey(value));
+    }
+
+    [Fact]
+    public void Load_OldFileWithoutTask6Fields_UsesDefaults()
+    {
+        // Pre-Task-6 file (Task-5-era keys only) — no DPAPI blob, any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(AudioChannels.Mono, loaded.Channel);
+            Assert.Equal("", loaded.OutputDevice);
+            Assert.Equal(SettingsStore.DefaultVolume, loaded.Volume);
+            Assert.False(loaded.AudioFeedback);
+            Assert.Equal(SettingsStore.DefaultCancelHotkey, loaded.CancelHotkey);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_BadTask6Values_CoerceWithWarnings()
+    {
+        // Bad channel/cancel-key coerce with warnings; a bad volume clamps
+        // silently (same contract as historyLimit). Any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"channel":"surround","outputDevice":"Speakers","volume":9999,"audioFeedback":true,"cancelHotkey":"bogus"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(AudioChannels.Mono, loaded.Channel);
+            Assert.Equal("Speakers", loaded.OutputDevice);
+            Assert.Equal(SettingsStore.MaxVolume, loaded.Volume);
+            Assert.True(loaded.AudioFeedback);
+            Assert.Equal(SettingsStore.DefaultCancelHotkey, loaded.CancelHotkey);
+            Assert.True(loaded.HasLoadWarnings);
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("channel"));
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("cancelHotkey"));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Save_Load_RoundTripsSoundAndCancel()
+    {
+        if (!OperatingSystem.IsWindows()) return; // Save uses DPAPI
+
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var store = new SettingsStore
+            {
+                Channel = AudioChannels.Average,
+                OutputDevice = "Synthetic Speakers",
+                Volume = 42,
+                AudioFeedback = true,
+                CancelHotkey = "Ctrl+Esc",
+            };
+            store.Save();
+
+            var reloaded = SettingsStore.Load();
+
+            Assert.Equal(AudioChannels.Average, reloaded.Channel);
+            Assert.Equal("Synthetic Speakers", reloaded.OutputDevice);
+            Assert.Equal(42, reloaded.Volume);
+            Assert.True(reloaded.AudioFeedback);
+            Assert.Equal("Ctrl+Esc", reloaded.CancelHotkey);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CorruptJson_SalvagesSurvivingTask6Fields()
+    {
+        // Truncated file — whole-parse fails, but the intact pairs salvage.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            var corrupt = """{"baseUrl":"https://example.invalid","channel":"stereo","volume":42,"audioFeedback":true,"cancelHotkey":"Ctrl+Esc","customPrompt":""";
+            File.WriteAllText(path, corrupt);
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(AudioChannels.Stereo, loaded.Channel);
+            Assert.Equal(42, loaded.Volume);
+            Assert.True(loaded.AudioFeedback);
+            Assert.Equal("Ctrl+Esc", loaded.CancelHotkey);
+            Assert.True(loaded.HasLoadWarnings);
+
+            // Never wipes: the corrupt bytes stay for manual recovery.
+            Assert.Equal(corrupt, File.ReadAllText(path));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void Load_CorruptJson_SalvagesSurvivingFieldsOverDefaults()
     {

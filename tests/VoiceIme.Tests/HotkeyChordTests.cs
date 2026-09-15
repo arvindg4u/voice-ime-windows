@@ -62,6 +62,57 @@ public sealed class HotkeyChordTests
     }
 
     [Theory]
+    [InlineData("Esc", 0x1B)]
+    [InlineData("esc", 0x1B)]
+    [InlineData("Escape", 0x1B)]
+    [InlineData("Space", 0x20)]
+    [InlineData("A", 'A')]
+    [InlineData("F5", 0x74)]
+    [InlineData("Ctrl+Esc", 0x1B)]
+    [InlineData("Alt+F4", 0x73)]
+    public void TryParseWithBareKey_AcceptsBareKeyAndFullChord(string chord, uint vk)
+    {
+        Assert.True(HotkeyChord.TryParseWithBareKey(chord, out _, out var actualVk));
+        Assert.Equal(vk, actualVk);
+    }
+
+    [Fact]
+    public void TryParseWithBareKey_FullChord_ReturnsModifiers()
+    {
+        Assert.True(HotkeyChord.TryParseWithBareKey("Ctrl+Esc", out var mods, out _));
+        Assert.Equal(HotkeyChord.ModControl, mods);
+    }
+
+    [Fact]
+    public void TryParseWithBareKey_BareKey_ReturnsZeroModifiers()
+    {
+        Assert.True(HotkeyChord.TryParseWithBareKey("Esc", out var mods, out _));
+        Assert.Equal(0u, mods);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Ctrl")]
+    [InlineData("Ctrl+Shift")]
+    [InlineData("bogus")]
+    [InlineData("Ctrl+Bogus")]
+    public void TryParseWithBareKey_Invalid_ReturnsFalse(string? chord)
+    {
+        Assert.False(HotkeyChord.TryParseWithBareKey(chord, out _, out _));
+    }
+
+    [Fact]
+    public void TryParse_StillRejectsBareKey_ForAlwaysOnHotkey()
+    {
+        // The dictation hotkey keeps TryParse: a bare Esc must never become a
+        // global always-on registration — only the busy-armed cancel path may
+        // use TryParseWithBareKey.
+        Assert.False(HotkeyChord.TryParse("Esc", out _, out _));
+    }
+
+    [Theory]
     [InlineData("hold_or_toggle", true)]
     [InlineData("push_to_talk", true)]
     [InlineData("toggle", true)]

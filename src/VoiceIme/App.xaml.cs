@@ -21,10 +21,12 @@ namespace VoiceIme;
 public partial class App : System.Windows.Application
 {
     private const int HotkeyId = 0xB001;
+    private const int CancelHotkeyId = 0xB002;
     internal const int TrayTextLimit = 63;
     private NotifyIcon? _tray;
     private Notifier _notifier = new((_, _, _) => { });
     private HotkeyWindow? _hotkeyWindow;
+    private HotkeyWindow? _cancelHotkeyWindow;
     private readonly AudioRecorder _recorder = new();
     private readonly LlmClient _llm = new();
     private SettingsStore _settings = SettingsStore.Load();
@@ -53,10 +55,12 @@ public partial class App : System.Windows.Application
         ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
         _settings = SettingsStore.Load();
         _recorder.AutoStopped += HandleAutoStop;
-        _recorder.LevelChanged += level => _overlay?.SetLevel(level);
+        _recorder.LevelChanged += level =>
+            _overlay?.SetLevel(SoundFeedback.ApplyDisplayGain(level, _settings.Volume));
         _coordinator.ErrorRaised += HandleError;
         _coordinator.OperationCancelled += () =>
         {
+            DisarmCancelHotkey();
             _overlay?.Hide();
             RefreshMenu();
             SetTray("Voice IME — ready");
@@ -90,6 +94,7 @@ public partial class App : System.Windows.Application
         _tray.DoubleClick += (_, _) => HandleToggleInput();
 
         _hotkeyWindow = new HotkeyWindow(HotkeyId, HandleHotkeyPress, OpenSettings);
+        _cancelHotkeyWindow = new HotkeyWindow(CancelHotkeyId, CancelRecording);
         RegisterStoredHotkey();
     }
 
@@ -239,6 +244,7 @@ public partial class App : System.Windows.Application
         var generation = _coordinator.Generation;
         var token = _coordinator.SessionToken;
         var hotkeyAt = DateTimeOffset.UtcNow;
+        ArmCancelHotkey();
         RefreshMenu();
         SetTray("Voice IME — recording… tap hotkey to stop");
         EnsureOverlay();
@@ -273,6 +279,7 @@ public partial class App : System.Windows.Application
         if (_coordinator.State != DictationState.Uploading) return;
         var generation = _coordinator.Generation;
         var token = _coordinator.SessionToken;
+        ArmCancelHotkey();
         RefreshMenu();
         SetTray("Voice IME — transcribing…");
         _overlay?.Show(OverlayPhase.Uploading);
@@ -314,6 +321,7 @@ public partial class App : System.Windows.Application
                 return;
             }
 
+            DisarmCancelHotkey();
             RefreshMenu();
             _overlay?.Hide();
             SetTray("Voice IME — no audio captured");
@@ -424,9 +432,11 @@ public partial class App : System.Windows.Application
         // machine — never touch status on a stale completion.
         if (_coordinator.ReportUploadSucceeded(generation))
         {
+            DisarmCancelHotkey();
             RefreshMenu();
             _overlay?.Hide();
             SetTray("Voice IME — pasted ✓");
+            SoundFeedback.PlayPostPasteTone(_settings);
         }
     }
 
@@ -444,6 +454,7 @@ public partial class App : System.Windows.Application
     private void HandleError(IDictationError error, Exception? cause = null)
     {
         ArgumentNullException.ThrowIfNull(error);
+        DisarmCancelHotkey();
         RefreshMenu();
         _overlay?.ShowError(error.UserMessage);
         _notifier.Notify(
@@ -486,9 +497,46 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void CancelRecording()
     {
+        DisarmCancelHotkey();
         _coordinator.CancelCurrentOperation();
         _recorder.Cancel();
     }
+
+    /// <summary>
+    /// Task 6 cancel arming (see <see cref="SoundFeedback"/>): the cancel key
+    /// registers only while busy (recording/uploading) and unregisters on
+    /// settle — a bare Esc must never be a global always-on registration.
+    /// Routes to the existing <c>CancelCurrentOperation</c> path via
+    /// <see cref="CancelRecording"/>, alongside the overlay Cancel button.
+    /// A zero-modifier chord registers as a bare key: Win32 accepts
+    /// modifiers=0, so Esc fires system-wide only for the seconds we are
+    /// busy. Idempotent: safe to call on every state entry.
+    /// </summary>
+    private void ArmCancelHotkey()
+    {
+        if (_cancelHotkeyWindow is null || !ShouldArmCancel(_coordinator.State))
+        {
+            return;
+        }
+
+        if (!HotkeyChord.TryParseWithBareKey(_settings.CancelHotkey, out var modifiers, out var vk))
+        {
+            modifiers = 0;
+            vk = 0x1B; // Esc — store coercion already guarantees this parses.
+        }
+
+        _cancelHotkeyWindow.Register(modifiers, vk);
+    }
+
+    /// <summary>
+    /// Pure arm-decision behind <see cref="ArmCancelHotkey"/>: the cancel key
+    /// may only register while busy. Any-OS unit-testable (see
+    /// <c>SoundFeedbackTests</c>); App itself cannot be constructed in tests.
+    /// </summary>
+    internal static bool ShouldArmCancel(DictationState state) =>
+        state is DictationState.Recording or DictationState.Uploading;
+
+    private void DisarmCancelHotkey() => _cancelHotkeyWindow?.Unregister();
 
     // MainWindow singleton: Task 4 deleted SettingsWindow (its Base
     // URL/keys/model/prompt fields live in Views.GeminiSettingsView now);
@@ -739,6 +787,8 @@ public partial class App : System.Windows.Application
         _recorder.Cancel();
         _overlay?.Close();
         _hotkeyWindow?.Dispose();
+        _cancelHotkeyWindow?.Dispose();
+        _cancelHotkeyWindow = null;
         if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); }
         _llm.Dispose();
         base.OnExit(e);

@@ -106,6 +106,37 @@ public static class HotkeyChord
         return mainKeys == 1 && modifiers != 0;
     }
 
+    /// <summary>
+    /// Parses a cancel-style key: either a full modifier+key chord (see
+    /// <see cref="TryParse"/>) or a single bare key ("Esc") with zero
+    /// modifiers. Bare keys are only safe for dynamically-armed shortcuts —
+    /// cancel registers during recording/uploading, then unregisters — never
+    /// for the always-on dictation hotkey, which must keep
+    /// <see cref="TryParse"/>. Never throws.
+    /// </summary>
+    public static bool TryParseWithBareKey(string? chord, out uint modifiers, out uint vk)
+    {
+        if (TryParse(chord, out modifiers, out vk))
+        {
+            return true;
+        }
+
+        modifiers = 0;
+        vk = 0;
+        if (string.IsNullOrWhiteSpace(chord))
+        {
+            return false;
+        }
+
+        var token = chord.Trim();
+        if (TryParseModifier(token, out _))
+        {
+            return false;
+        }
+
+        return TryParseKey(token, out vk);
+    }
+
     /// <summary>Formats modifiers + VK back to canonical "Ctrl+Shift+Space" form.</summary>
     public static string Format(uint modifiers, uint vk)
     {

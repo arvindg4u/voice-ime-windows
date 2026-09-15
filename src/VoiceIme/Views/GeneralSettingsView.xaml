@@ -112,6 +112,113 @@
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <ComboBox x:Name="ChannelBox" DockPanel.Dock="Right" MinWidth="160"
+                              VerticalAlignment="Center" HorizontalAlignment="Right"
+                              FontSize="13" Foreground="{DynamicResource HandyText}"
+                              FontFamily="{DynamicResource HandyFontFamily}"
+                              SelectionChanged="ChannelBox_SelectionChanged" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Capture channel" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Stored for now; capture still opens the default device format."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <ComboBox x:Name="OutputBox" MinWidth="200"
+                                  VerticalAlignment="Center"
+                                  FontSize="13" Foreground="{DynamicResource HandyText}"
+                                  FontFamily="{DynamicResource HandyFontFamily}"
+                                  SelectionChanged="OutputBox_SelectionChanged" />
+                        <Button x:Name="RefreshOutputButton" Content="&#x21BB;" Margin="6,0,0,0"
+                                Padding="12,4" VerticalAlignment="Center"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                ToolTip="Refresh output device list"
+                                Click="RefreshOutputButton_Click" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Output device" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Falls back to the system output when unset. Stored for now; playback still uses the default device."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Slider x:Name="VolumeSlider" MinWidth="160" Minimum="0" Maximum="100"
+                                VerticalAlignment="Center"
+                                Style="{DynamicResource HandySlider}"
+                                ValueChanged="VolumeSlider_ValueChanged" />
+                        <TextBlock x:Name="VolumeValue" Width="44" Margin="8,0,0,0"
+                                   VerticalAlignment="Center" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}"
+                                   Text="100%" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Volume" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Display gain for the recording level meter only — never changes capture gain."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <CheckBox x:Name="FeedbackCheck" DockPanel.Dock="Right"
+                              VerticalAlignment="Center" HorizontalAlignment="Right"
+                              Style="{DynamicResource HandyToggle}"
+                              Click="FeedbackCheck_Click" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Audio feedback" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Plays a short tone after a successful paste."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <TextBlock Text="CANCEL" Style="{DynamicResource HandyGroupHeader}" />
+        <Border Style="{DynamicResource HandySettingCard}">
+            <StackPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Border x:Name="CancelHotkeyChip" CornerRadius="6" BorderThickness="1"
+                                Padding="8,4" Cursor="Hand" VerticalAlignment="Center"
+                                Focusable="True"
+                                ToolTip="Click to record a new cancel key"
+                                BorderBrush="{DynamicResource HandyCardBorder}"
+                                Background="{DynamicResource HandySecondaryBackground}"
+                                MouseLeftButtonUp="CancelHotkeyChip_Click"
+                                KeyDown="CancelHotkeyChip_KeyDown">
+                            <TextBlock x:Name="CancelHotkeyText" FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource HandyText}"
+                                       Text="Esc" />
+                        </Border>
+                        <Button x:Name="ResetCancelButton" Content="Reset" Margin="6,0,0,0"
+                                Padding="12,4" VerticalAlignment="Center"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                ToolTip="Restore Esc"
+                                Click="ResetCancelButton_Click" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Cancel key" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Armed only while recording or uploading. Click the chip, press a key, release to save. Click elsewhere to cancel."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock x:Name="CancelHotkeyError" FontSize="12" TextWrapping="Wrap"
+                           Margin="0,4,0,0" Visibility="Collapsed"
+                           Foreground="{DynamicResource HandyError}" />
             </StackPanel>
         </Border>
     </StackPanel>
