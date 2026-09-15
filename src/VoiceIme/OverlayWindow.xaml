@@ -80,6 +80,10 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                            Text="Sending…" />
+                <TextBlock x:Name="PreviewText" Visibility="Collapsed"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                           MaxWidth="130" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="ErrorText" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="12" Foreground="{DynamicResource HandyError}"

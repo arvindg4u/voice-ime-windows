@@ -51,6 +51,28 @@ public sealed record OverlayState(OverlayPhase Phase, float Level, string? Messa
     }
 
     /// <summary>
+    /// Joins finalized text and the interim hypothesis into a single preview
+    /// line: both parts trimmed, joined with one space, empty parts dropped.
+    /// Empty input yields "".
+    /// </summary>
+    internal static string FormatPreview(string finals, string interim)
+    {
+        var head = finals.Trim();
+        var tail = interim.Trim();
+        if (head.Length == 0)
+        {
+            return tail;
+        }
+
+        if (tail.Length == 0)
+        {
+            return head;
+        }
+
+        return head + " " + tail;
+    }
+
+    /// <summary>
     /// Moves to a new phase, resetting the level (a fresh phase starts flat)
     /// and replacing the message.
     /// </summary>

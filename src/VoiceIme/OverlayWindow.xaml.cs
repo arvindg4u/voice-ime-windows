@@ -31,6 +31,7 @@ public partial class OverlayWindow : Window
     // one read, not a dispatcher call (Handy OVERLAY_ENABLED pattern).
     private int _visibleFlag;
     private volatile float _level;
+    private volatile string _preview = string.Empty;
     private string _mode = OverlayModes.Full;
     private OverlayState _state = OverlayState.Initial;
     private readonly DispatcherTimer _timer;
@@ -97,6 +98,7 @@ public partial class OverlayWindow : Window
         _state = OverlayState.Initial.WithPhase(
             phase, phase == OverlayPhase.Error ? "Something went wrong" : null);
         _level = 0f;
+        _preview = string.Empty;
         _phaseStartUtc = DateTime.UtcNow;
         _uploadTicks = 0;
         Render();
@@ -177,6 +179,30 @@ public partial class OverlayWindow : Window
         RenderWaveform();
     }
 
+    /// <summary>
+    /// Shows the streaming hypothesis (finals + interim) during Recording.
+    /// Thread-safe via the <see cref="SetLevel"/> dispatcher pattern; an empty
+    /// string clears. Never shows outside
+    /// <see cref="OverlayPhase.Recording"/>.
+    /// </summary>
+    public void SetPreview(string previewText)
+    {
+        ArgumentNullException.ThrowIfNull(previewText);
+        if (Volatile.Read(ref _visibleFlag) == 0)
+        {
+            return;
+        }
+
+        _preview = previewText;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(RenderPreview);
+            return;
+        }
+
+        RenderPreview();
+    }
+
     /// <summary>Current phase snapshot (pure <see cref="OverlayState"/>).</summary>
     internal OverlayState Snapshot => _state with { Level = _level };
 
@@ -234,9 +260,8 @@ public partial class OverlayWindow : Window
 
         // Task 8 "minimal" mode: the pill raises, but the waveform bars stay
         // hidden — recording still shows dot + timer, uploading is untouched.
-        var showWaveform = recording
-            && string.Equals(_mode, OverlayModes.Full, StringComparison.Ordinal);
-        WavePanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
+        // The interim preview (if any) takes the center slot instead.
+        RenderPreview();
         SendingLabel.Visibility = uploading ? Visibility.Visible : Visibility.Collapsed;
         // The timer shows the capture duration while recording and keeps
         // climbing while uploading (indeterminate — no backend streaming).
@@ -269,6 +294,28 @@ public partial class OverlayWindow : Window
         TimerText.Text = OverlayState.FormatElapsed(DateTime.UtcNow - _phaseStartUtc);
         SendingLabel.Text = OverlayState.FormatUploadingLabel(_uploadTicks);
         _uploadTicks++;
+    }
+
+    /// <summary>
+    /// Shows the interim preview in the center slot while Recording with
+    /// non-empty text (taking the slot from the waveform); collapsed
+    /// otherwise, so Uploading/Error never show it. UI thread only.
+    /// </summary>
+    private void RenderPreview()
+    {
+        var preview = _preview;
+        var showPreview = _state.Phase == OverlayPhase.Recording
+            && preview.Length > 0;
+        PreviewText.Visibility = showPreview ? Visibility.Visible : Visibility.Collapsed;
+        if (showPreview)
+        {
+            PreviewText.Text = preview;
+        }
+
+        var showWaveform = _state.Phase == OverlayPhase.Recording
+            && !showPreview
+            && string.Equals(_mode, OverlayModes.Full, StringComparison.Ordinal);
+        WavePanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RenderWaveform()
