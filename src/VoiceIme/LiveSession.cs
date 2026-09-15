@@ -122,7 +122,9 @@ internal sealed class LiveSession : IAsyncDisposable
             }
             catch (LiveSocketException ex)
             {
-                return new LiveAttemptOutcome.Fail(NetworkError, ex);
+                return IsRotateSignal(ex)
+                    ? new LiveAttemptOutcome.Rotate()
+                    : new LiveAttemptOutcome.Fail(NetworkError, ex);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -139,7 +141,9 @@ internal sealed class LiveSession : IAsyncDisposable
             }
             catch (LiveSocketException ex)
             {
-                return new LiveAttemptOutcome.Fail(NetworkError, ex);
+                return IsRotateSignal(ex)
+                    ? new LiveAttemptOutcome.Rotate()
+                    : new LiveAttemptOutcome.Fail(NetworkError, ex);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -281,8 +285,11 @@ internal sealed class LiveSession : IAsyncDisposable
 
     private static LiveAttemptOutcome MapSocketFailure(LiveSocketException ex)
     {
-        if (ex.Message.Contains(RotateSignal, StringComparison.Ordinal))
+        if (IsRotateSignal(ex))
             return new LiveAttemptOutcome.Rotate();
         return new LiveAttemptOutcome.Fail(ex.Message, ex);
     }
+
+    private static bool IsRotateSignal(LiveSocketException ex) =>
+        ex.Message.Contains(RotateSignal, StringComparison.Ordinal);
 }
