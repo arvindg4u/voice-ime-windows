@@ -1,12 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -43,12 +38,47 @@ public sealed class LlmClient : IDisposable
         string model,
         int startIndex = 0,
         string customPrompt = "",
+        bool smartMode = false,
         CancellationToken ct = default)
     {
-        var transport = new RestTranscriptionTransport(_http, baseUrl);
-        var request = new TranscriptionRequest(wav, model, apiKeys, startIndex, customPrompt);
-        var result = await transport.TranscribeAsync(request, ct);
+        var request = new TranscriptionRequest(wav, model, apiKeys, startIndex, customPrompt, smartMode);
+        var result = await TranscribeRoutedAsync(request, baseUrl, ct);
         return (result.Transcript, result.UsedKeyIndex);
+    }
+
+    /// <summary>
+    /// Static routing first, then at most one transport switch: only the two
+    /// narrow 400 patterns (same key, no rotation for the switch) may move a
+    /// request. Fallback targets never fall back again, so loops are
+    /// impossible by construction.
+    /// </summary>
+    private async Task<TranscriptionResult> TranscribeRoutedAsync(
+        TranscriptionRequest request, string baseUrl, CancellationToken ct)
+    {
+        switch (ModelRouter.RouteModel(request.Model))
+        {
+            case TransportKind.Live:
+                return await new LiveTranscriptionTransport().TranscribeAsync(request, ct);
+            case TransportKind.Interactions:
+                return await new InteractionsTranscriptionTransport(_http, baseUrl)
+                    .TranscribeAsync(request, ct);
+            default:
+                try
+                {
+                    return await new RestTranscriptionTransport(_http, baseUrl)
+                        .TranscribeAsync(request, ct);
+                }
+                catch (TransportFallbackException fb) when (fb.Target == TransportKind.Live)
+                {
+                    return await new LiveTranscriptionTransport().TranscribeAsync(
+                        request with { StartKeyIndex = fb.KeyIndex }, ct);
+                }
+                catch (TransportFallbackException fb) when (fb.Target == TransportKind.Interactions)
+                {
+                    return await new InteractionsTranscriptionTransport(_http, baseUrl)
+                        .TranscribeAsync(request with { StartKeyIndex = fb.KeyIndex }, ct);
+                }
+        }
     }
 
     internal static string BuildGeminiRequestJson(string audioB64, string customPrompt) =>
