@@ -4,6 +4,8 @@
 
 `worktree-phase2-live-engine` (base `2cab9b1`), pushed to origin. CI: Windows workflow `34936029792` — **success**.
 
+MERGED to `main` 2026-09-15: fast-forward `6c542ae..c901944` (no conflicts — `origin/main` was a direct ancestor of HEAD). Post-merge main CI run `34937524484` — **success**, `Passed: 653, Failed: 0, Total: 653` at head `c901944`.
+
 ## Commits
 
 - `0c30a34` feat: add Live wire-protocol builders, parsers, and WAV strip
