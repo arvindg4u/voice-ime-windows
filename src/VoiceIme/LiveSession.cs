@@ -60,6 +60,9 @@ internal sealed class LiveSession : IAsyncDisposable
     private readonly long _sessionId;
     private readonly LiveSessionOptions _options;
     private bool _disposed;
+    private CancellationTokenSource? _sessionCts;
+    private bool _activityStarted;
+    private bool _completed;
 
     internal LiveSession(
         ILiveSocket socket,
@@ -177,11 +180,220 @@ internal sealed class LiveSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Streaming phase 1: connects, sends setup, and gates on the setup ACK.
+    /// Returns false (never throws, except on caller cancellation) when the
+    /// session cannot proceed; the caller treats that as a typed session
+    /// failure. Bounds the whole streaming session by LiveTimeout from this
+    /// call: the linked CTS is stored as a field and torn down in
+    /// <see cref="CompleteAndReadFinalAsync"/> or <see cref="DisposeAsync"/>.
+    /// Reuses the Phase-2 <see cref="WaitForSetupAckAsync"/> verbatim — its
+    /// null-means-proceed contract maps directly onto this bool API, so no
+    /// second ACK loop exists to drift.
+    /// </summary>
+    internal async Task<bool> ConnectAndSetupAsync(Uri uri, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        ct.ThrowIfCancellationRequested();
+        if (_sessionCts is not null)
+            throw new InvalidOperationException("Session is already connected.");
+
+        _sessionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _sessionCts.CancelAfter(_options.LiveTimeout);
+        var liveToken = _sessionCts.Token;
+
+        try
+        {
+            try
+            {
+                await _socket.ConnectAsync(uri, liveToken);
+            }
+            catch (LiveSocketException)
+            {
+                // Collapses Phase-2's Rotate/Fail mapping to false by design:
+                // this API reports only proceed/no-proceed.
+                TearDownSession();
+                return false;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                TearDownSession();
+                return false;
+            }
+
+            try
+            {
+                await _socket.SendTextAsync(LiveProtocol.BuildLiveSetupJson(_model, _smartMode), liveToken);
+            }
+            catch (LiveSocketException)
+            {
+                TearDownSession();
+                return false;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                TearDownSession();
+                return false;
+            }
+
+            LiveAttemptOutcome? ack;
+            try
+            {
+                ack = await WaitForSetupAckAsync(liveToken, ct);
+            }
+            catch (LiveSocketException)
+            {
+                // Receive failure during the ACK gate: same no-proceed outcome.
+                TearDownSession();
+                return false;
+            }
+            if (ack is not null)
+            {
+                TearDownSession();
+                return false;
+            }
+            return true;
+        }
+        catch (TransportFallbackException)
+        {
+            // No Live code throws this; mapped defensively, mirroring RunAsync.
+            TearDownSession();
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            // Caller cancellation (OCE unwrapped by contract): release the
+            // session CTS so no LiveTimeout timer leaks, then rethrow.
+            TearDownSession();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Streaming phase 2: sends <paramref name="pcmChunk"/> as one audio
+    /// message in call order. The first call sends the activityStart turn
+    /// marker exactly once before its chunk. Chunks must be 16 kHz mono
+    /// 16-bit PCM — caller contract, not validated here. Throws
+    /// LiveSocketException on send failure with OperationCanceledException
+    /// unwrapped. After <see cref="CompleteAndReadFinalAsync"/> starts this
+    /// is a no-op: it returns without sending and never throws.
+    /// </summary>
+    internal async Task SendPcmAsync(byte[] pcmChunk, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(pcmChunk);
+        if (_completed)
+            return;
+        var sessionCts = _sessionCts;
+        if (sessionCts is null)
+            throw new InvalidOperationException("Session is not connected.");
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(sessionCts.Token, ct);
+        var token = linkedCts.Token;
+        if (!_activityStarted)
+        {
+            await _socket.SendTextAsync(LiveProtocol.BuildLiveActivityStartJson(), token);
+            _activityStarted = true;
+        }
+        await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioMessage(pcmChunk), token);
+    }
+
+    /// <summary>
+    /// Streaming phase 3: sends activityEnd + audioStreamEnd in order, then a
+    /// bounded finalize reusing the exact Phase-2 <see cref="ReadFinalAsync"/>
+    /// logic (turnComplete-not-final ruling, empty-to-typed-error, guard
+    /// checks, Rotate-signal mapping) → Done/Rotate/Fail. Closes and disposes
+    /// the socket before returning, mirroring RunAsync's finally.
+    /// </summary>
+    internal async Task<LiveAttemptOutcome> CompleteAndReadFinalAsync(CancellationToken ct)
+    {
+        _completed = true;
+        var sessionCts = _sessionCts;
+        if (sessionCts is null)
+            throw new InvalidOperationException("Session is not connected.");
+        var liveToken = sessionCts.Token;
+
+        try
+        {
+            try
+            {
+                using var tailCts = CancellationTokenSource.CreateLinkedTokenSource(liveToken, ct);
+                var tailToken = tailCts.Token;
+                await _socket.SendTextAsync(LiveProtocol.BuildLiveActivityEndJson(), tailToken);
+                await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioEndJson(), tailToken);
+            }
+            catch (LiveSocketException ex)
+            {
+                return MapSocketFailure(ex);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return new LiveAttemptOutcome.Fail(TimedOut, null);
+            }
+
+            return await ReadFinalAsync(liveToken, ct);
+        }
+        catch (TransportFallbackException ex)
+        {
+            // No Live code throws this; mapped defensively, mirroring RunAsync.
+            return new LiveAttemptOutcome.Fail(Failed, ex);
+        }
+        catch (LiveSocketException ex)
+        {
+            return MapSocketFailure(ex);
+        }
+        finally
+        {
+            TearDownSession();
+            await CloseSocketAsync();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
             return;
         _disposed = true;
+        TearDownSession();
+        await _socket.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Cancels and disposes the session CTS exactly once; safe to call from
+    /// setup failure, complete, and dispose paths. The socket stays open for
+    /// <see cref="DisposeAsync"/> (or Complete's close) to release, mirroring
+    /// RunAsync's ownership.
+    /// </summary>
+    private void TearDownSession()
+    {
+        var sessionCts = Interlocked.Exchange(ref _sessionCts, null);
+        if (sessionCts is null)
+            return;
+        try
+        {
+            sessionCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Cancel-after-dispose race from a concurrent teardown; already gone.
+        }
+        sessionCts.Dispose();
+    }
+
+    /// <summary>
+    /// Best-effort close under <see cref="LiveSessionOptions.CloseGrace"/>,
+    /// then dispose — the Complete path's mirror of RunAsync's finally. Never
+    /// masks the attempt outcome.
+    /// </summary>
+    private async Task CloseSocketAsync()
+    {
+        using var closeCts = new CancellationTokenSource(_options.CloseGrace);
+        try
+        {
+            await _socket.CloseAsync(closeCts.Token);
+        }
+        catch
+        {
+            // Best-effort close: never mask the attempt outcome.
+        }
         await _socket.DisposeAsync();
     }
 
