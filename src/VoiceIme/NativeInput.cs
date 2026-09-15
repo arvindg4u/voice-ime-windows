@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -9,7 +10,8 @@ namespace VoiceIme;
 /// <summary>
 /// Win32 glue: global hotkey registration and transcript delivery.
 /// Delivery mirrors Android (clipboard + commit): set clipboard, then synthesize
-/// Ctrl+V into the focused window via SendInput — the combination that reaches
+/// the configured paste chord (Task 8: Ctrl+V / Shift+Insert / Ctrl+Shift+V)
+/// into the focused window via SendInput — the combinations that reach
 /// browsers, Office, and editors. Elevated targets are out of reach unless this
 /// app also runs elevated (documented limitation, not a silent failure).
 /// </summary>
@@ -56,10 +58,18 @@ public static class NativeInput
 
     /// <summary>
     /// Copies text to the clipboard then pastes it into the focused window
-    /// with Ctrl+V. Restores the user's previous clipboard afterwards.
-    /// Must run on an STA thread.
+    /// with the configured paste chord. Restores the previous clipboard
+    /// afterwards. Must run on an STA thread.
     /// </summary>
-    public static void PasteIntoFocusedWindow(string text)
+    public static void PasteIntoFocusedWindow(string text) =>
+        PasteIntoFocusedWindow(text, PasteMethods.CtrlV);
+
+    /// <summary>
+    /// Chord-aware overload: the method is the persisted
+    /// <see cref="PasteMethods"/> string (already coerced at the settings
+    /// boundary); unknown values fall back to Ctrl+V, never throw.
+    /// </summary>
+    public static void PasteIntoFocusedWindow(string text, string? method)
     {
         System.Windows.Forms.IDataObject? previous = null;
         try { previous = System.Windows.Forms.Clipboard.GetDataObject(); } catch { /* clipboard busy */ }
@@ -75,7 +85,7 @@ public static class NativeInput
 
         // Give the clipboard a beat to settle before the keystroke lands.
         Thread.Sleep(50);
-        SendCtrlV();
+        SendChord(PasteChords.ForMethod(method));
 
         // Restore what the user had (best-effort, never throws).
         if (previous is not null)
@@ -85,15 +95,38 @@ public static class NativeInput
         }
     }
 
-    private static void SendCtrlV()
+    /// <summary>
+    /// AutoSubmit (Task 8): synthesize Enter into the focused window right
+    /// after a paste, for single-line targets (search boxes, chat inputs).
+    /// Throws only when SendInput itself reports short — same contract as
+    /// the paste chord above.
+    /// </summary>
+    public static void PressEnter()
     {
-        var inputs = new INPUT[]
+        var inputs = new INPUT[] { KeyDown(PasteChords.VkReturn), KeyUp(PasteChords.VkReturn) };
+        SendOrThrow(inputs);
+    }
+
+    private static void SendChord(PasteChord chord)
+    {
+        var inputs = new List<INPUT>(chord.Modifiers.Length * 2 + 2);
+        foreach (var modifier in chord.Modifiers)
         {
-            KeyDown(0x11), // CTRL
-            KeyDown((ushort)VK_V),
-            KeyUp((ushort)VK_V),
-            KeyUp(0x11),
-        };
+            inputs.Add(KeyDown(modifier));
+        }
+
+        inputs.Add(KeyDown(chord.Key));
+        inputs.Add(KeyUp(chord.Key));
+        for (var i = chord.Modifiers.Length - 1; i >= 0; i--)
+        {
+            inputs.Add(KeyUp(chord.Modifiers[i]));
+        }
+
+        SendOrThrow(inputs.ToArray());
+    }
+
+    private static void SendOrThrow(INPUT[] inputs)
+    {
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
         if (sent != inputs.Length)
             throw new IOException("Couldn't send keystrokes to the focused window");

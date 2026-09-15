@@ -31,6 +31,7 @@ public partial class OverlayWindow : Window
     // one read, not a dispatcher call (Handy OVERLAY_ENABLED pattern).
     private int _visibleFlag;
     private volatile float _level;
+    private string _mode = OverlayModes.Full;
     private OverlayState _state = OverlayState.Initial;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _errorTimer;
@@ -74,13 +75,24 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>Shows the overlay in the given phase and positions it. Thread-safe.</summary>
-    public void Show(OverlayPhase phase)
+    public void Show(OverlayPhase phase) => Show(phase, OverlayModes.Full);
+
+    /// <summary>
+    /// Task 8 mode-aware show (Handy show_overlay parity): "minimal" raises
+    /// the pill without the waveform bars, "full" is unchanged. "none" never
+    /// reaches here — App gates on <see cref="OverlayModes.ShouldShowPill"/>
+    /// before calling — and coerces to full defensively if it does.
+    /// Thread-safe.
+    /// </summary>
+    public void Show(OverlayPhase phase, string? mode)
     {
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(() => Show(phase));
+            Dispatcher.BeginInvoke(() => Show(phase, mode));
             return;
         }
+
+        _mode = OverlayModes.Coerce(mode);
 
         _state = OverlayState.Initial.WithPhase(
             phase, phase == OverlayPhase.Error ? "Something went wrong" : null);
@@ -220,7 +232,11 @@ public partial class OverlayWindow : Window
             SpinnerRotate.BeginAnimation(RotateTransform.AngleProperty, null);
         }
 
-        WavePanel.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
+        // Task 8 "minimal" mode: the pill raises, but the waveform bars stay
+        // hidden — recording still shows dot + timer, uploading is untouched.
+        var showWaveform = recording
+            && string.Equals(_mode, OverlayModes.Full, StringComparison.Ordinal);
+        WavePanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
         SendingLabel.Visibility = uploading ? Visibility.Visible : Visibility.Collapsed;
         // The timer shows the capture duration while recording and keeps
         // climbing while uploading (indeterminate — no backend streaming).

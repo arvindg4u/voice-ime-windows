@@ -9,8 +9,9 @@ namespace VoiceIme.Tests;
 /// window station — on headless runners construction throws and the test
 /// passes vacuously (same pattern as <c>MainWindowTests</c>). Full coverage
 /// runs on windows-latest CI. The view is built with a no-op saver so tests
-/// never touch disk or DPAPI. Display + persist only: paste delivery keeps the
-/// existing fixed Ctrl+V path until T8 wires the shell.
+/// never touch disk or DPAPI. Display + persist only: Task 8 wires the shell
+/// behaviors (autostart reconcile, tray guard, overlay modes, paste chords)
+/// in App — this file asserts what the controls show and persist.
 /// </summary>
 [Collection("WpfSta")]
 public sealed class AdvancedSettingsViewTests
@@ -23,7 +24,11 @@ public sealed class AdvancedSettingsViewTests
             Assert.False(view.StartHiddenChecked == true);
             Assert.False(view.AutostartChecked == true);
             Assert.True(view.ShowTrayIconChecked == true);
-            Assert.True(view.ShowOverlayChecked == true);
+            Assert.Equal(3, view.ShowOverlayItemCount);
+            Assert.Equal(
+                OverlayModes.LabelFor(OverlayModes.Full),
+                view.SelectedShowOverlayLabel);
+            Assert.False(view.AutoSubmitChecked == true);
             Assert.Equal(3, view.PasteMethodItemCount);
             Assert.Equal(
                 PasteMethods.LabelFor(PasteMethods.CtrlV),
@@ -41,7 +46,8 @@ public sealed class AdvancedSettingsViewTests
             StartHidden = true,
             Autostart = true,
             ShowTrayIcon = false,
-            ShowOverlay = false,
+            ShowOverlay = OverlayModes.Minimal,
+            AutoSubmit = true,
             PasteMethod = PasteMethods.CtrlShiftV,
             HistoryLimit = 250,
         };
@@ -50,7 +56,10 @@ public sealed class AdvancedSettingsViewTests
             Assert.True(view.StartHiddenChecked == true);
             Assert.True(view.AutostartChecked == true);
             Assert.False(view.ShowTrayIconChecked == true);
-            Assert.False(view.ShowOverlayChecked == true);
+            Assert.Equal(
+                OverlayModes.LabelFor(OverlayModes.Minimal),
+                view.SelectedShowOverlayLabel);
+            Assert.True(view.AutoSubmitChecked == true);
             Assert.Equal(
                 PasteMethods.LabelFor(PasteMethods.CtrlShiftV),
                 view.SelectedPasteMethodLabel);
@@ -144,12 +153,18 @@ public sealed class AdvancedSettingsViewTests
         TryRunOnSta(store, view =>
         {
             store.StartHidden = true;
+            store.ShowOverlay = OverlayModes.None;
+            store.AutoSubmit = true;
             store.PasteMethod = PasteMethods.ShiftInsert;
             store.HistoryLimit = 42;
 
             view.ReloadFromSettings();
 
             Assert.True(view.StartHiddenChecked == true);
+            Assert.Equal(
+                OverlayModes.LabelFor(OverlayModes.None),
+                view.SelectedShowOverlayLabel);
+            Assert.True(view.AutoSubmitChecked == true);
             Assert.Equal(
                 PasteMethods.LabelFor(PasteMethods.ShiftInsert),
                 view.SelectedPasteMethodLabel);

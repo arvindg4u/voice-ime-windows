@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -87,7 +88,7 @@ public partial class App : System.Windows.Application
         _tray = new NotifyIcon
         {
             Text = TrayText(_settings.Hotkey),
-            Visible = true,
+            Visible = _settings.ShowTrayIcon,
             Icon = System.Drawing.SystemIcons.Information,
             ContextMenuStrip = BuildMenu(),
         };
@@ -96,6 +97,16 @@ public partial class App : System.Windows.Application
         _hotkeyWindow = new HotkeyWindow(HotkeyId, HandleHotkeyPress, OpenSettings);
         _cancelHotkeyWindow = new HotkeyWindow(CancelHotkeyId, CancelRecording);
         RegisterStoredHotkey();
+
+        // Task 8 behaviors (Handy startup/tray parity): reconcile the logon
+        // shortcut against Autostart, then enforce the tray guard. The guard
+        // runs after shortcut reconcile — an icon-off + hidden-window start
+        // must surface the window so the app is never stranded invisible.
+        // StartHidden itself needs no window call: OnStartup never creates a
+        // window (MainWindow only builds on demand in OpenSettings/
+        // OpenHistory), so tray launch is the default.
+        ReconcileAutostart();
+        EnforceTrayGuard();
     }
 
     /// <summary>
@@ -246,9 +257,8 @@ public partial class App : System.Windows.Application
         var hotkeyAt = DateTimeOffset.UtcNow;
         ArmCancelHotkey();
         RefreshMenu();
-        SetTray("Voice IME — recording… tap hotkey to stop");
-        EnsureOverlay();
-        _overlay?.Show(OverlayPhase.Recording);
+        SetTray(TrayStateText.TooltipFor(DictationState.Recording, _settings.Hotkey));
+        ShowOverlay(OverlayPhase.Recording);
         if (MicrophoneDevices.ListNames().Count == 0)
         {
             _coordinator.ReportStartResult(
@@ -281,8 +291,8 @@ public partial class App : System.Windows.Application
         var token = _coordinator.SessionToken;
         ArmCancelHotkey();
         RefreshMenu();
-        SetTray("Voice IME — transcribing…");
-        _overlay?.Show(OverlayPhase.Uploading);
+        SetTray(TrayStateText.TooltipFor(DictationState.Uploading, _settings.Hotkey));
+        ShowOverlay(OverlayPhase.Uploading);
         var stopAt = DateTimeOffset.UtcNow;
         byte[] wav;
         try
@@ -418,7 +428,14 @@ public partial class App : System.Windows.Application
         var pasteAt = DateTimeOffset.UtcNow;
         try
         {
-            NativeInput.PasteIntoFocusedWindow(transcript);
+            NativeInput.PasteIntoFocusedWindow(transcript, _settings.PasteMethod);
+            // AutoSubmit: Enter right after the chord lands, for single-line
+            // targets. Inside the same try — an Enter failure is a paste
+            // failure, not a silent half-delivery.
+            if (_settings.AutoSubmit)
+            {
+                NativeInput.PressEnter();
+            }
         }
         catch (Exception pasteEx)
         {
@@ -456,13 +473,17 @@ public partial class App : System.Windows.Application
         ArgumentNullException.ThrowIfNull(error);
         DisarmCancelHotkey();
         RefreshMenu();
-        _overlay?.ShowError(error.UserMessage);
+        if (OverlayModes.ShouldShowPill(_settings.ShowOverlay))
+        {
+            EnsureOverlay();
+            _overlay?.ShowError(error.UserMessage);
+        }
         _notifier.Notify(
             "Voice IME",
             error.UserMessage,
             NotificationSeverity.Error,
             secrets: _settings.ApiKeys);
-        SetTray($"Voice IME — {error.UserMessage}");
+        SetTray(TrayStateText.TooltipFor(DictationState.Error, _settings.Hotkey, error.UserMessage));
         if (cause is not null)
         {
             // Type names only — raw exception text may embed key material.
@@ -487,6 +508,123 @@ public partial class App : System.Windows.Application
 
         _overlay = new OverlayWindow();
         _overlay.CancelRequested += CancelRecording;
+    }
+
+    /// <summary>
+    /// Task 8 overlay gating (Handy show_overlay parity, "none" mode): the
+    /// pill only raises when the mode allows it. Errors still surface via
+    /// balloon + tray — hiding the pill never hides the failure.
+    /// </summary>
+    private void ShowOverlay(OverlayPhase phase)
+    {
+        if (!OverlayModes.ShouldShowPill(_settings.ShowOverlay))
+        {
+            return;
+        }
+
+        EnsureOverlay();
+        _overlay?.Show(phase, _settings.ShowOverlay);
+    }
+
+    /// <summary>
+    /// Task 8 autostart reconcile (Handy LaunchAtStartup parity, Startup-
+    /// folder subset): create the logon shortcut when opted in but missing,
+    /// remove it when opted out but present, otherwise leave the folder
+    /// alone. Pure decision via <see cref="StartupShell.DecideReconcile"/> —
+    /// this method only executes it. Never throws out of startup: shell
+    /// failures warn via trace, a missing shortcut must not kill launch.
+    /// </summary>
+    private void ReconcileAutostart()
+    {
+        try
+        {
+            var path = StartupShell.ShortcutPath(
+                Environment.GetFolderPath(Environment.SpecialFolder.Startup));
+            switch (StartupShell.DecideReconcile(_settings.Autostart, File.Exists(path)))
+            {
+                case StartupAction.Create:
+                    CreateStartupShortcut(path);
+                    break;
+                case StartupAction.Remove:
+                    File.Delete(path);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"autostart reconcile failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// Applies an Autostart toggle immediately (Advanced view save path):
+    /// create wins the shortcut, clear removes it. Same never-throw
+    /// contract as <see cref="ReconcileAutostart"/>.
+    /// </summary>
+    private void ApplyAutostartSetting()
+    {
+        ReconcileAutostart();
+    }
+
+    /// <summary>
+    /// Writes the logon shortcut via the Windows Script Host shell object —
+    /// the small dependency-free route to a .lnk (no COM reference needed,
+    /// late-bound so a missing wshom has one catch site in
+    /// <see cref="ReconcileAutostart"/>). Target is this process's EXE path.
+    /// </summary>
+    private static void CreateStartupShortcut(string shortcutPath)
+    {
+        var shellType = Type.GetTypeFromProgID("WScript.Shell");
+        if (shellType is null)
+        {
+            throw new InvalidOperationException("Windows Script Host shell is unavailable.");
+        }
+
+        dynamic shell = Activator.CreateInstance(shellType)!;
+        try
+        {
+            dynamic shortcut = shell.CreateShortcut(shortcutPath);
+            try
+            {
+                shortcut.TargetPath = Environment.ProcessPath
+                    ?? System.Reflection.Assembly.GetEntryAssembly()?.Location
+                    ?? string.Empty;
+                shortcut.WorkingDirectory = AppContext.BaseDirectory;
+                shortcut.Description = "Voice IME — launch to the tray at sign-in";
+                shortcut.Save();
+            }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shortcut);
+            }
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
+        }
+    }
+
+    /// <summary>
+    /// Task 8 tray guard (Handy parity): icon off + window hidden strands the
+    /// app invisible, so that combination surfaces the window instead. Runs at
+    /// startup and after Advanced saves. Pure decision via
+    /// <see cref="TrayStateText.ResolveTrayGuard"/> — this method only
+    /// applies it (and syncs icon visibility to the setting).
+    /// </summary>
+    private void EnforceTrayGuard()
+    {
+        if (_tray is not null)
+        {
+            _tray.Visible = _settings.ShowTrayIcon;
+        }
+
+        var windowVisible = _mainWindow?.IsVisible == true;
+        if (TrayStateText.ResolveTrayGuard(_settings.ShowTrayIcon, windowVisible)
+            == TrayGuardAction.ShowWindow)
+        {
+            _mainWindow ??= CreateMainWindow();
+            ShowMainWindow();
+        }
     }
 
     /// <summary>
@@ -576,6 +714,28 @@ public partial class App : System.Windows.Application
             general.Saved -= RefreshTrayTextFromSave;
             general.Saved += RefreshTrayTextFromSave;
         }
+
+        // Task 8: Advanced saves apply live — autostart shortcut follows the
+        // toggle and the tray guard re-runs (an icon-off save with the window
+        // hidden surfaces the window instead of stranding the app). Idempotent
+        // subscribe, same pattern as the General handler above.
+        if (window.SectionView(MainSection.Advanced) is Views.AdvancedSettingsView advanced)
+        {
+            advanced.Saved -= ApplyAdvancedSave;
+            advanced.Saved += ApplyAdvancedSave;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Views.AdvancedSettingsView.Saved"/> adapter: reapplies the
+    /// Task 8 shell behaviors the view persists (same shared-store rationale
+    /// as <see cref="RefreshTrayTextFromSave"/> — the event's store IS the
+    /// live one, so this only executes the reconciles).
+    /// </summary>
+    private void ApplyAdvancedSave(SettingsStore _)
+    {
+        ApplyAutostartSetting();
+        EnforceTrayGuard();
     }
 
     private MainWindow? _mainWindow;

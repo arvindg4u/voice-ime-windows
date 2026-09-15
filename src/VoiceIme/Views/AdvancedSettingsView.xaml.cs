@@ -54,8 +54,14 @@ public partial class AdvancedSettingsView : System.Windows.Controls.UserControl
     /// <summary>Test seam: tray-icon toggle state.</summary>
     internal bool? ShowTrayIconChecked => ShowTrayIconCheck.IsChecked;
 
-    /// <summary>Test seam: overlay toggle state.</summary>
-    internal bool? ShowOverlayChecked => ShowOverlayCheck.IsChecked;
+    /// <summary>Test seam: overlay dropdown item count.</summary>
+    internal int ShowOverlayItemCount => ShowOverlayBox.Items.Count;
+
+    /// <summary>Test seam: selected overlay mode label.</summary>
+    internal string? SelectedShowOverlayLabel => ShowOverlayBox.SelectedItem as string;
+
+    /// <summary>Test seam: auto-submit toggle state.</summary>
+    internal bool? AutoSubmitChecked => AutoSubmitCheck.IsChecked;
 
     /// <summary>Test seam: paste-method dropdown item count.</summary>
     internal int PasteMethodItemCount => PasteMethodBox.Items.Count;
@@ -117,7 +123,22 @@ public partial class AdvancedSettingsView : System.Windows.Controls.UserControl
         StartHiddenCheck.IsChecked = _settings.StartHidden;
         AutostartCheck.IsChecked = _settings.Autostart;
         ShowTrayIconCheck.IsChecked = _settings.ShowTrayIcon;
-        ShowOverlayCheck.IsChecked = _settings.ShowOverlay;
+
+        ShowOverlayBox.SelectionChanged -= ShowOverlayBox_SelectionChanged;
+        try
+        {
+            ShowOverlayBox.Items.Clear();
+            ShowOverlayBox.Items.Add(OverlayModes.LabelFor(OverlayModes.Full));
+            ShowOverlayBox.Items.Add(OverlayModes.LabelFor(OverlayModes.Minimal));
+            ShowOverlayBox.Items.Add(OverlayModes.LabelFor(OverlayModes.None));
+            ShowOverlayBox.SelectedItem = OverlayModes.LabelFor(_settings.ShowOverlay);
+        }
+        finally
+        {
+            ShowOverlayBox.SelectionChanged += ShowOverlayBox_SelectionChanged;
+        }
+
+        AutoSubmitCheck.IsChecked = _settings.AutoSubmit;
 
         PasteMethodBox.SelectionChanged -= PasteMethodBox_SelectionChanged;
         try
@@ -155,9 +176,20 @@ public partial class AdvancedSettingsView : System.Windows.Controls.UserControl
         TrySaveSettings(out _);
     }
 
-    private void ShowOverlayCheck_Click(object sender, RoutedEventArgs e)
+    private void ShowOverlayBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        _settings.ShowOverlay = ShowOverlayCheck.IsChecked == true;
+        if (_initializing)
+        {
+            return;
+        }
+
+        _settings.ShowOverlay = OverlayModes.ModeForLabel(ShowOverlayBox.SelectedItem as string);
+        TrySaveSettings(out _);
+    }
+
+    private void AutoSubmitCheck_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.AutoSubmit = AutoSubmitCheck.IsChecked == true;
         TrySaveSettings(out _);
     }
 

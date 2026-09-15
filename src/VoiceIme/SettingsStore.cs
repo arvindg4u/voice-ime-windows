@@ -49,10 +49,14 @@ public sealed class SettingsStore
 
     // Task 1 (Handy parity gaps): Advanced screen fields. Same contract —
     // additive, field-level defaults, coerce-don't-throw, no version bump.
+    // Task 8: ShowOverlay graduated bool→string ("none"/"minimal"/"full",
+    // default full); legacy true/false coerce silently, no version bump.
+    // Task 8: AutoSubmit (Enter after paste) is additive, shipped false.
     public bool StartHidden { get; set; }
     public bool Autostart { get; set; }
     public bool ShowTrayIcon { get; set; } = true;
-    public bool ShowOverlay { get; set; } = true;
+    public string ShowOverlay { get; set; } = OverlayModes.Full;
+    public bool AutoSubmit { get; set; }
     public string PasteMethod { get; set; } = PasteMethods.CtrlV;
 
     public const int MinHistoryLimit = 10;
@@ -186,6 +190,7 @@ public sealed class SettingsStore
         Hotkey = CoerceHotkey(Hotkey, Warn);
         ActivationMode = CoerceActivationMode(ActivationMode, Warn);
         Microphone ??= "";
+        ShowOverlay = OverlayModes.Coerce(ShowOverlay, Warn);
         PasteMethod = CoercePasteMethod(PasteMethod, Warn);
         HistoryLimit = ClampHistoryLimit(HistoryLimit);
         Theme = CoerceTheme(Theme, Warn);
@@ -212,6 +217,7 @@ public sealed class SettingsStore
         Hotkey = CoerceHotkey(Hotkey);
         ActivationMode = CoerceActivationMode(ActivationMode);
         Microphone ??= "";
+        ShowOverlay = OverlayModes.Coerce(ShowOverlay);
         PasteMethod = CoercePasteMethod(PasteMethod);
         HistoryLimit = ClampHistoryLimit(HistoryLimit);
         Theme = CoerceTheme(Theme);
@@ -247,6 +253,7 @@ public sealed class SettingsStore
             autostart = Autostart,
             showTrayIcon = ShowTrayIcon,
             showOverlay = ShowOverlay,
+            autoSubmit = AutoSubmit,
             pasteMethod = PasteMethod,
             historyLimit = HistoryLimit,
             theme = Theme,
@@ -483,7 +490,11 @@ public sealed class SettingsStore
         StartHidden = GetBool(root, "startHidden", StartHidden);
         Autostart = GetBool(root, "autostart", Autostart);
         ShowTrayIcon = GetBool(root, "showTrayIcon", ShowTrayIcon);
-        ShowOverlay = GetBool(root, "showOverlay", ShowOverlay);
+        // GetString renders a legacy Task 1 JSON bool as "true"/"false" text;
+        // Coerce maps true→full / false→none, still no version bump.
+        ShowOverlay = OverlayModes.Coerce(
+            GetString(root, "showOverlay", ShowOverlay), Warn);
+        AutoSubmit = GetBool(root, "autoSubmit", AutoSubmit);
         PasteMethod = CoercePasteMethod(GetString(root, "pasteMethod", PasteMethods.CtrlV), Warn);
         HistoryLimit = ClampHistoryLimit(GetInt(root, "historyLimit", HistoryLimit));
         Theme = CoerceTheme(GetString(root, "theme", AppThemes.System), Warn);
@@ -598,10 +609,26 @@ public sealed class SettingsStore
             ShowTrayIcon = showTray.Value;
         }
 
-        var showOverlay = SalvageBool(raw, "showOverlay");
-        if (showOverlay.HasValue)
+        var showOverlay = SalvageString(raw, "showOverlay");
+        if (showOverlay is not null)
         {
-            ShowOverlay = showOverlay.Value;
+            ShowOverlay = OverlayModes.Coerce(showOverlay, Warn);
+        }
+        else
+        {
+            // Legacy Task 1 JSON bool (SalvageString only matches quoted
+            // text): true→full, false→none, same silent mapping as Coerce.
+            var showOverlayBool = SalvageBool(raw, "showOverlay");
+            if (showOverlayBool.HasValue)
+            {
+                ShowOverlay = showOverlayBool.Value ? OverlayModes.Full : OverlayModes.None;
+            }
+        }
+
+        var autoSubmit = SalvageBool(raw, "autoSubmit");
+        if (autoSubmit.HasValue)
+        {
+            AutoSubmit = autoSubmit.Value;
         }
 
         var pasteMethod = SalvageString(raw, "pasteMethod");

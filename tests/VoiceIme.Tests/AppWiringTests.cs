@@ -172,6 +172,8 @@ public sealed class AppWiringTests : IDisposable
                 settings.Hotkey = "Alt+F4";
                 settings.Model = "test-model";
                 settings.StartHidden = true;
+                settings.ShowOverlay = OverlayModes.Minimal;
+                settings.AutoSubmit = true;
                 settings.HistoryLimit = 42;
                 settings.Theme = AppThemes.Dark;
                 clips.Add("dictated while hidden");
@@ -192,6 +194,10 @@ public sealed class AppWiringTests : IDisposable
                 Assert.Equal("test-model", gemini.ModelText);
                 Assert.Equal("dictated while hidden", Assert.Single(history.Rows).Body);
                 Assert.True(advanced.StartHiddenChecked == true);
+                Assert.Equal(
+                    OverlayModes.LabelFor(OverlayModes.Minimal),
+                    advanced.SelectedShowOverlayLabel);
+                Assert.True(advanced.AutoSubmitChecked == true);
                 Assert.Equal("42", advanced.HistoryLimitText);
                 Assert.Equal(AppThemes.LabelFor(AppThemes.Dark), about.SelectedThemeLabel);
             }

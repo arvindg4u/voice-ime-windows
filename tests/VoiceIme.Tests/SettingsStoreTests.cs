@@ -665,7 +665,8 @@ public sealed class SettingsStoreTests
                 StartHidden = true,
                 Autostart = true,
                 ShowTrayIcon = false,
-                ShowOverlay = false,
+                ShowOverlay = OverlayModes.Minimal,
+                AutoSubmit = true,
                 PasteMethod = PasteMethods.ShiftInsert,
                 HistoryLimit = 250,
             };
@@ -676,7 +677,8 @@ public sealed class SettingsStoreTests
             Assert.True(reloaded.StartHidden);
             Assert.True(reloaded.Autostart);
             Assert.False(reloaded.ShowTrayIcon);
-            Assert.False(reloaded.ShowOverlay);
+            Assert.Equal(OverlayModes.Minimal, reloaded.ShowOverlay);
+            Assert.True(reloaded.AutoSubmit);
             Assert.Equal(PasteMethods.ShiftInsert, reloaded.PasteMethod);
             Assert.Equal(250, reloaded.HistoryLimit);
         }
@@ -704,7 +706,8 @@ public sealed class SettingsStoreTests
             Assert.False(loaded.StartHidden);
             Assert.False(loaded.Autostart);
             Assert.True(loaded.ShowTrayIcon);
-            Assert.True(loaded.ShowOverlay);
+            Assert.Equal(OverlayModes.Full, loaded.ShowOverlay);
+            Assert.False(loaded.AutoSubmit);
             Assert.Equal(PasteMethods.CtrlV, loaded.PasteMethod);
             Assert.Equal(SettingsStore.DefaultHistoryLimit, loaded.HistoryLimit);
         }
@@ -733,6 +736,122 @@ public sealed class SettingsStoreTests
             Assert.Equal(500, loaded.HistoryLimit);
             Assert.True(loaded.HasLoadWarnings);
             Assert.Contains(loaded.LoadWarnings, w => w.Contains("pasteMethod"));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    // Task 8 (Handy parity gaps): ShowOverlay graduated bool→string.
+    // Legacy Task-1 JSON bools map silently (true→full, false→none); bad
+    // strings warn and fall back to full; no version bump; never throw.
+
+    [Fact]
+    public void Load_LegacyBoolShowOverlayTrue_CoercesToFull()
+    {
+        // Pre-Task-8 file with the Task-1 bool — no DPAPI blob, any-OS safe.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"showOverlay":true}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(OverlayModes.Full, loaded.ShowOverlay);
+            Assert.False(loaded.HasLoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_LegacyBoolShowOverlayFalse_CoercesToNone()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"showOverlay":false}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(OverlayModes.None, loaded.ShowOverlay);
+            Assert.False(loaded.HasLoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_StringShowOverlay_RoundTripsModes()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"showOverlay":"minimal"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(OverlayModes.Minimal, loaded.ShowOverlay);
+            Assert.False(loaded.HasLoadWarnings);
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_BadShowOverlay_CoercesToFullWithWarning()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"showOverlay":"hologram"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.Equal(OverlayModes.Full, loaded.ShowOverlay);
+            Assert.True(loaded.HasLoadWarnings);
+            Assert.Contains(loaded.LoadWarnings, w => w.Contains("showOverlay"));
+        }
+        finally
+        {
+            SettingsStore.SettingsPathOverride = null;
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_OldFileWithoutAutoSubmit_DefaultsFalse()
+    {
+        // Pre-Task-8 file carries no autoSubmit — additive, off by default.
+        var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        SettingsStore.SettingsPathOverride = () => path;
+        try
+        {
+            File.WriteAllText(path,
+                """{"baseUrl":"https://example.invalid","model":"m","customPrompt":"","keyCursor":0,"showOverlay":"full"}""");
+
+            var loaded = SettingsStore.Load();
+
+            Assert.False(loaded.AutoSubmit);
         }
         finally
         {

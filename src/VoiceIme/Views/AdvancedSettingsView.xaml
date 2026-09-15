@@ -53,14 +53,15 @@
                     </StackPanel>
                 </DockPanel>
                 <DockPanel Style="{DynamicResource HandySettingRow}">
-                    <CheckBox x:Name="ShowOverlayCheck" DockPanel.Dock="Right"
+                    <ComboBox x:Name="ShowOverlayBox" DockPanel.Dock="Right" MinWidth="200"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
-                              Style="{DynamicResource HandyToggle}"
-                              Click="ShowOverlayCheck_Click" />
+                              FontSize="13" Foreground="{DynamicResource HandyText}"
+                              FontFamily="{DynamicResource HandyFontFamily}"
+                              SelectionChanged="ShowOverlayBox_SelectionChanged" />
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Show overlay" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Show the recording pill overlay. Stored for now."
+                        <TextBlock Text="Overlay detail: Full pill, Minimal pill without the waveform, or None."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -81,6 +82,19 @@
                         <TextBlock Text="Paste method" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock Text="The keystroke sent after the transcript lands on the clipboard."
+                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </DockPanel>
+                <DockPanel Style="{DynamicResource HandySettingRow}">
+                    <CheckBox x:Name="AutoSubmitCheck" DockPanel.Dock="Right"
+                              VerticalAlignment="Center" HorizontalAlignment="Right"
+                              Style="{DynamicResource HandyToggle}"
+                              Click="AutoSubmitCheck_Click" />
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="Auto-submit" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{DynamicResource HandyText}" />
+                        <TextBlock Text="Press Enter right after pasting (for search boxes and chat inputs)."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
