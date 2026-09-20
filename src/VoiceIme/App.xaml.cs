@@ -37,6 +37,34 @@ public partial class App : System.Windows.Application
     private DispatcherTimer? _releaseTimer;
     private SingleInstance? _singleInstance;
 
+    // Task 5 Live streaming state. The pump buffers recorder chunks pre-ACK
+    // (brief §6 ruling); the drain starts only after ConnectAndSetupAsync
+    // succeeds. All fields are published in one synchronous block on the UI
+    // thread before the first post-publish await, so the stop path always
+    // sees a consistent snapshot. The NAudio callback only calls TryEnqueue
+    // (thread-safe) and marshals session failure to the Dispatcher before
+    // touching the coordinator or UI. Interim/final strings are display-only.
+    private readonly LiveSessionGuard _liveGuard = new();
+    private LivePcmPump? _livePump;
+    private LiveSession? _liveSession;
+    private Task<bool>? _liveSetup;
+    private Task? _liveDrain;
+    private bool _liveDrainStarted;
+    private Action<byte[]>? _livePcmHandler;
+    private long _liveGeneration;
+    private int _liveKeyIndex;
+    private string _liveFinals = string.Empty;
+    private string _liveInterim = string.Empty;
+
+    /// <summary>
+    /// Latched Live failure (pump-full NAudio callback, background drain
+    /// error). Set synchronously on any thread before marshaling, consumed
+    /// exactly once on the UI thread — by <see cref="FailLiveSession"/>, the
+    /// record path, or the stop path, whichever runs first. Fail-closed: a
+    /// failed session never finalizes or pastes, even if stop wins the race.
+    /// </summary>
+    private volatile bool _liveFailed;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -266,6 +294,24 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // Live models buffer recorder chunks through the pump from the first
+        // callback (brief §6: never lose the beginning of speech). The pump
+        // and handler are published before capture starts; teardown on any
+        // start failure below keeps no session alive.
+        var live = ModelRouter.RouteModel(_settings.Model) == TransportKind.Live;
+        LivePcmPump? pump = null;
+        Action<byte[]>? pcmHandler = null;
+        if (live)
+        {
+            pump = new LivePcmPump();
+            pcmHandler = chunk =>
+            {
+                if (!pump.TryEnqueue(chunk))
+                    FailLiveSession(generation, new TranscriptionError("Transcription failed — try again"));
+            };
+            _recorder.PcmChunkAvailable += pcmHandler;
+        }
+
         try
         {
             await Task.Run(() => _recorder.Start(), token);
@@ -275,12 +321,26 @@ public partial class App : System.Windows.Application
         {
             // User cancelled before capture started — CancelCurrentOperation
             // already drained to idle; reconciling here would stick UI.
+            TeardownLivePump(pump, pcmHandler);
             _coordinator.NotifyUploadCancelled(generation);
         }
         catch (Exception ex)
         {
+            TeardownLivePump(pump, pcmHandler);
             _coordinator.ReportStartResult(
                 generation, false, RecordingError.FromException(ex), ex);
+        }
+
+        if (live && pump is not null && pcmHandler is not null
+            && generation == _coordinator.Generation
+            && _coordinator.State == DictationState.Recording
+            && !token.IsCancellationRequested)
+        {
+            await StartLiveSessionAsync(pump, pcmHandler, generation, token);
+        }
+        else
+        {
+            TeardownLivePump(pump, pcmHandler);
         }
     }
 
@@ -293,6 +353,21 @@ public partial class App : System.Windows.Application
         RefreshMenu();
         SetTray(TrayStateText.TooltipFor(DictationState.Uploading, _settings.Hotkey));
         ShowOverlay(OverlayPhase.Uploading);
+
+        // Live models finalize the streamed session (pump → drain → final)
+        // instead of uploading a WAV. The Live branch owns its session only
+        // when the recording actually started one; a model switch mid-record
+        // falls through to the unchanged WAV path below.
+        if (ModelRouter.RouteModel(_settings.Model) == TransportKind.Live
+            && _livePump is not null
+            && _liveSession is not null
+            && _liveSetup is not null
+            && generation == _liveGeneration)
+        {
+            await StopLiveAndCommitAsync(generation, token);
+            return;
+        }
+
         var stopAt = DateTimeOffset.UtcNow;
         byte[] wav;
         try
@@ -416,6 +491,20 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        CommitTranscript(transcript, usedIndex, generation, token, transcribeAt);
+    }
+
+    /// <summary>
+    /// Shared commit tail for both dictation paths (extracted from
+    /// <see cref="TranscribeAndPasteAsync"/> for the Task 5 Live branch):
+    /// cursor advance, safe logging, history, paste, and the exactly-once
+    /// <see cref="DictationCoordinator.ReportUploadSucceeded"/> gate. Callers
+    /// enforce staleness before invoking — a stale completion must never
+    /// reach this helper. Synchronous: every effect inside is synchronous.
+    /// </summary>
+    private void CommitTranscript(
+        string transcript, int usedIndex, long generation, CancellationToken token, DateTimeOffset transcribeAt)
+    {
         _settings.KeyCursor = (_settings.ApiKeys.Count == 0)
             ? 0
             : (usedIndex + 1) % _settings.ApiKeys.Count;
@@ -454,6 +543,476 @@ public partial class App : System.Windows.Application
             _overlay?.Hide();
             SetTray("Voice IME — pasted ✓");
             SoundFeedback.PlayPostPasteTone(_settings);
+        }
+    }
+
+    /// <summary>
+    /// Task 5 Live session start: runs after the recorder starts (brief §6 —
+    /// the pump already buffers chunks, so no speech is lost waiting for the
+    /// setup ACK). Single attempt on the cursor key: streaming cannot replay
+    /// a partial session onto the next key, so Rotate fails this attempt
+    /// instead of rotating. Setup-false rolls back through
+    /// <see cref="DictationCoordinator.ReportStartResult"/> exactly like a
+    /// capture start failure. Runs on the UI thread; every continuation below
+    /// stays on it (no ConfigureAwait(false)), so field publish/claim order
+    /// is total without locks.
+    /// </summary>
+    private async Task StartLiveSessionAsync(
+        LivePcmPump pump, Action<byte[]> handler, long generation, CancellationToken token)
+    {
+        _livePump = pump;
+        _livePcmHandler = handler;
+        _liveGeneration = generation;
+        _liveKeyIndex = 0;
+        _liveFinals = string.Empty;
+        _liveInterim = string.Empty;
+        _liveFailed = false;
+        _liveDrainStarted = false;
+        _liveSetup = null;
+        _liveDrain = null;
+
+        var keys = _settings.ApiKeys
+            .Select(k => k.Trim())
+            .Where(k => k.Length > 0)
+            .ToList();
+        if (keys.Count == 0)
+        {
+            TeardownLivePump(pump, handler);
+            ClearLiveFields();
+            _coordinator.ReportStartResult(
+                generation, false, new TranscriptionError("No API key — open Settings"));
+            return;
+        }
+
+        var keyIndex = ((_settings.KeyCursor % keys.Count) + keys.Count) % keys.Count;
+        _liveKeyIndex = keyIndex;
+        var session = new LiveSession(
+            _llm.LiveSocketsForTests?.Create() ?? new ClientWebSocketLiveSocket(),
+            _settings.Model, _settings.SmartMode, _liveGuard, _liveGuard.Next());
+        session.InterimReceived += text => PublishLivePreview(text, false);
+        session.FinalReceived += delta => PublishLivePreview(delta, true);
+        _liveSession = session;
+        var uri = LiveProtocol.BuildLiveUri(LiveProtocol.LiveHost(_settings.BaseUrl), keys[keyIndex]);
+        var setup = session.ConnectAndSetupAsync(uri, token);
+        _liveSetup = setup;
+
+        bool connected;
+        try
+        {
+            connected = await setup;
+        }
+        catch (OperationCanceledException)
+        {
+            TeardownLivePump(pump, handler);
+            await DisposeLiveSessionQuietly(session);
+            ClearLiveFields();
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        if (!connected
+            || _liveFailed
+            || generation != _coordinator.Generation
+            || _coordinator.State != DictationState.Recording
+            || token.IsCancellationRequested)
+        {
+            TeardownLivePump(pump, handler);
+            await DisposeLiveSessionQuietly(session);
+            ClearLiveFields();
+            if (!connected
+                && !_liveFailed
+                && generation == _coordinator.Generation
+                && _coordinator.State == DictationState.Recording
+                && !token.IsCancellationRequested)
+            {
+                _coordinator.ReportStartResult(
+                    generation, false, new TranscriptionError("Timed out — try again"));
+            }
+            else if (!_liveFailed)
+            {
+                // A latched failure surfaces through FailLiveSession — stay
+                // silent here so the typed error appears exactly once.
+                _coordinator.NotifyUploadCancelled(generation);
+            }
+
+            return;
+        }
+
+        StartLiveDrain(pump, session, generation, token);
+    }
+
+    /// <summary>
+    /// Claims the exactly-once drain starter (UI thread both callers — the
+    /// record path after setup, the stop path before Complete — so a plain
+    /// flag suffices). The drain runs concurrently with recording once the
+    /// ACK lands; at stop it finishes the buffered tail. Never faults: the
+    /// wrapper converts every failure, so the stop path's await is safe.
+    /// </summary>
+    private void StartLiveDrain(
+        LivePcmPump pump, LiveSession session, long generation, CancellationToken token)
+    {
+        if (_liveDrainStarted)
+            return;
+        _liveDrainStarted = true;
+        _liveDrain = RunLiveDrainAsync(pump, session, generation, token);
+    }
+
+    /// <summary>
+    /// Background drain wrapper: pump chunks → session in order until
+    /// <see cref="LivePcmPump.Complete"/>. Cancellation is silent (the cancel
+    /// path owns the UI); any other failure reports a typed error through
+    /// <see cref="FailLiveSession"/> — never a partial paste. No logging:
+    /// chunks are raw audio.
+    /// </summary>
+    private async Task RunLiveDrainAsync(
+        LivePcmPump pump, LiveSession session, long generation, CancellationToken token)
+    {
+        try
+        {
+            await pump.DrainAsync(session.SendPcmAsync, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // CancelCurrentOperation owns the UI from here.
+        }
+        catch (Exception ex)
+        {
+            FailLiveSession(generation, MapLiveError(ex));
+        }
+    }
+
+    /// <summary>
+    /// Maps a drain failure to a user-safe typed error. A rotate signal means
+    /// the attempt is over (streaming cannot replay onto the next key);
+    /// anything else is a network or transcription failure. Fixed strings
+    /// only — socket messages never surface.
+    /// </summary>
+    private static TranscriptionError MapLiveError(Exception ex) =>
+        ex is LiveSocketException live
+        && live.Message.Contains("Rate limited", StringComparison.Ordinal)
+            ? new TranscriptionError("Rate limited on all keys — retry later")
+            : ex is LiveSocketException
+                ? new TranscriptionError("Network error — check connection")
+                : new TranscriptionError("Transcription failed — try again");
+
+    /// <summary>
+    /// Live preview fan-in: finals accumulate, interim replaces. Marshals to
+    /// the Dispatcher (session events fire on the drain/reader path), which
+    /// also serializes concurrent interim/final arrivals in order.
+    /// </summary>
+    private void PublishLivePreview(string text, bool isFinal)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => PublishLivePreview(text, isFinal));
+            return;
+        }
+
+        if (isFinal)
+            _liveFinals += text;
+        else
+            _liveInterim = text;
+        _overlay?.SetPreview(OverlayState.FormatPreview(_liveFinals, _liveInterim));
+    }
+
+    /// <summary>
+    /// Fails the in-flight Live session from any thread (pump-full NAudio
+    /// callback, background drain failure): unsubscribes, cancels to Idle,
+    /// and surfaces the typed error. Stale generations (already stopped or
+    /// superseded) are ignored — exactly-once surfacing by construction.
+    /// </summary>
+    private void FailLiveSession(long generation, TranscriptionError error)
+    {
+        _liveFailed = true;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => FailLiveSession(generation, error));
+            return;
+        }
+
+        if (generation != _liveGeneration || !_liveFailed)
+            return;
+        _liveFailed = false;
+        DetachLivePump();
+        var session = _liveSession;
+        ClearLiveFields();
+        _ = DisposeLiveSessionQuietly(session);
+        _coordinator.CancelCurrentOperation();
+        HandleError(error);
+    }
+
+    /// <summary>
+    /// The exact commit predicate the Live stop path enforces before paste:
+    /// live token alive, generation current, machine still Uploading. Static
+    /// so the integration tests drive it without the App singleton.
+    /// </summary>
+    internal static bool ShouldCommitLiveTranscript(
+        long generation, CancellationToken token, DictationCoordinator coordinator)
+    {
+        ArgumentNullException.ThrowIfNull(coordinator);
+        return !token.IsCancellationRequested
+            && generation == coordinator.Generation
+            && coordinator.State == DictationState.Uploading;
+    }
+
+    /// <summary>
+    /// Live stop path: detaches the pump handler, stops capture (the WAV is
+    /// discarded — memory-only), resolves the setup gate, drains the buffered
+    /// tail, finalizes, and commits through the shared
+    /// <see cref="CommitTranscript"/> exactly once. Every failure funnels to
+    /// the coordinator with the typed error; cancellation is always silent.
+    /// </summary>
+    private async Task StopLiveAndCommitAsync(long generation, CancellationToken token)
+    {
+        var pump = _livePump;
+        var session = _liveSession;
+        var setup = _liveSetup;
+        var keyIndex = _liveKeyIndex;
+        DetachLivePump();
+        ClearLiveFields();
+        var transcribeAt = DateTimeOffset.UtcNow;
+
+        // A failure latched before/during stop (pump-full, drain error) wins
+        // over finalizing: a failed session never pastes, even truncated.
+        if (await AbortIfLiveFailedAsync(generation, token, pump, session))
+            return;
+
+        byte[] wav;
+        try
+        {
+            wav = await _recorder.StopAsync(token);
+            token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException)
+        {
+            if (pump is not null) TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+        catch (Exception ex)
+        {
+            if (pump is not null) TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.ReportUploadFailed(
+                generation, new RecordingError(RecordingErrorReason.Unknown), ex);
+            return;
+        }
+
+        // The recording is captured; its bytes never leave memory.
+        Array.Clear(wav, 0, wav.Length);
+
+        if (session is null || pump is null || setup is null)
+        {
+            _coordinator.ReportUploadFailed(
+                generation, new RecordingError(RecordingErrorReason.Unknown));
+            return;
+        }
+
+        // A cancel that landed after StopAsync must not finalize.
+        if (token.IsCancellationRequested)
+        {
+            TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        // The setup gate may still be in flight (stop pressed mid-handshake):
+        // it is bounded by LiveTimeout inside the session, so awaiting is safe.
+        bool connected;
+        try
+        {
+            connected = await setup;
+        }
+        catch (OperationCanceledException)
+        {
+            TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        if (!connected)
+        {
+            TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            if (ShouldCommitLiveTranscript(generation, token, _coordinator))
+                _coordinator.ReportUploadFailed(generation, new TranscriptionError("Timed out — try again"));
+            else
+                _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        // Exactly-once drain (the record path normally already started it),
+        // then Complete-then-finalize so the last buffered chunk (§15) is
+        // delivered before the end markers.
+        StartLiveDrain(pump, session, generation, token);
+        pump.Complete();
+        if (_liveDrain is not null)
+            await _liveDrain;
+
+        // A failure latched during the drain (drain error racing stop) also
+        // aborts before finalize — same fail-closed rule as above.
+        if (await AbortIfLiveFailedAsync(generation, token, pump, session))
+            return;
+
+        // A cancel that landed during the drain must not finalize.
+        if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
+        {
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        LiveAttemptOutcome outcome;
+        try
+        {
+            outcome = await session.CompleteAndReadFinalAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+        catch (Exception) when (token.IsCancellationRequested || generation != _coordinator.Generation)
+        {
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+        catch (Exception ex)
+        {
+            await DisposeLiveSessionQuietly(session);
+            _coordinator.ReportUploadFailed(
+                generation, new TranscriptionError("Transcription failed — try again"), ex);
+            return;
+        }
+
+        await DisposeLiveSessionQuietly(session);
+        switch (outcome)
+        {
+            case LiveAttemptOutcome.Done done:
+                if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
+                {
+                    _coordinator.NotifyUploadCancelled(generation);
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(done.Text))
+                {
+                    PersistFailedLiveRow("Got empty transcript — try again");
+                    _coordinator.ReportUploadFailed(
+                        generation, new TranscriptionError("Got empty transcript — try again"));
+                    return;
+                }
+
+                CommitTranscript(done.Text, keyIndex, generation, token, transcribeAt);
+                break;
+            case LiveAttemptOutcome.Rotate:
+                if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
+                {
+                    _coordinator.NotifyUploadCancelled(generation);
+                    return;
+                }
+
+                PersistFailedLiveRow("Rate limited on all keys — retry later");
+                _coordinator.ReportUploadFailed(
+                    generation, new TranscriptionError("Rate limited on all keys — retry later"));
+                break;
+            case LiveAttemptOutcome.Fail fail:
+                if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
+                {
+                    _coordinator.NotifyUploadCancelled(generation);
+                    return;
+                }
+
+                PersistFailedLiveRow(fail.Message);
+                _coordinator.ReportUploadFailed(generation, new TranscriptionError(fail.Message), fail.Cause);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Consumes a latched Live failure: releases the session and surfaces the
+    /// typed error (or stays silent when already stale), then reports true so
+    /// the stop path aborts instead of finalizing. Exactly-once with
+    /// <see cref="FailLiveSession"/> via the shared latch.
+    /// </summary>
+    private async Task<bool> AbortIfLiveFailedAsync(
+        long generation, CancellationToken token, LivePcmPump? pump, LiveSession? session)
+    {
+        if (!_liveFailed)
+            return false;
+        _liveFailed = false;
+        if (pump is not null)
+            TeardownLivePump(pump, null);
+        await DisposeLiveSessionQuietly(session);
+        if (ShouldCommitLiveTranscript(generation, token, _coordinator))
+            _coordinator.ReportUploadFailed(generation, new TranscriptionError("Transcription failed — try again"));
+        else
+            _coordinator.NotifyUploadCancelled(generation);
+        return true;
+    }
+
+    /// <summary>
+    /// Persists a failed Live attempt as a retryable empty-text row, mirroring
+    /// the REST path (audio is never persisted). Kept separate so the REST
+    /// path diff stays moved-code-only.
+    /// </summary>
+    private void PersistFailedLiveRow(string message)
+    {
+        var failed = _clips.Add(string.Empty);
+        if (_mainWindow?.SectionView(MainSection.History)
+            is Views.HistorySettingsView history)
+        {
+            history.AttachError(failed.Id, message);
+        }
+    }
+
+    /// <summary>
+    /// Unsubscribes the NAudio chunk handler. Pump completion/disposal is the
+    /// owner's job (<see cref="TeardownLivePump"/>); this only detaches.
+    /// </summary>
+    private void DetachLivePump()
+    {
+        var handler = _livePcmHandler;
+        _livePcmHandler = null;
+        if (handler is not null)
+            _recorder.PcmChunkAvailable -= handler;
+    }
+
+    /// <summary>Releases a pump that will never drain: complete then dispose (both idempotent).</summary>
+    private void TeardownLivePump(LivePcmPump? pump, Action<byte[]>? handler)
+    {
+        if (handler is not null)
+            _recorder.PcmChunkAvailable -= handler;
+        pump?.Complete();
+        pump?.Dispose();
+    }
+
+    /// <summary>Clears the published Live snapshot. Callers snapshot locals first.</summary>
+    private void ClearLiveFields()
+    {
+        _livePump = null;
+        _liveSession = null;
+        _liveSetup = null;
+        _liveDrain = null;
+    }
+
+    /// <summary>Best-effort session release: tears down the session CTS and socket, never throws.</summary>
+    private static async Task DisposeLiveSessionQuietly(LiveSession? session)
+    {
+        if (session is null)
+            return;
+        try
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best effort — the finalize path already closed the socket.
         }
     }
 
@@ -635,8 +1194,31 @@ public partial class App : System.Windows.Application
     private void CancelRecording()
     {
         DisarmCancelHotkey();
+        DetachLivePump();
+        var liveSession = _liveSession;
+        ClearLiveFields();
+        ClearLivePreview();
+        _ = DisposeLiveSessionQuietly(liveSession);
         _coordinator.CancelCurrentOperation();
         _recorder.Cancel();
+    }
+
+    /// <summary>
+    /// Clears the streaming hypothesis display (cancel/complete paths). The
+    /// strings reset here; the overlay hides through its existing path.
+    /// </summary>
+    private void ClearLivePreview()
+    {
+        _liveFinals = string.Empty;
+        _liveInterim = string.Empty;
+        try
+        {
+            _overlay?.SetPreview(string.Empty);
+        }
+        catch
+        {
+            // Best effort — the overlay may already be gone at shutdown.
+        }
     }
 
     /// <summary>
@@ -950,6 +1532,15 @@ public partial class App : System.Windows.Application
         _singleInstance?.Dispose();
         _singleInstance = null;
         _releaseTimer?.Stop();
+        // Task 5: release the Live session without awaiting (socket close is
+        // best-effort here; the session CTS is cancelled synchronously first).
+        DetachLivePump();
+        var livePump = _livePump;
+        var liveSession = _liveSession;
+        ClearLiveFields();
+        livePump?.Complete();
+        livePump?.Dispose();
+        _ = DisposeLiveSessionQuietly(liveSession);
         _coordinator.Dispose();
         _recorder.Cancel();
         _overlay?.Close();
