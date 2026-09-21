@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Media;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -528,23 +526,40 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
     private void TestSoundButton_Click(object sender, RoutedEventArgs e)
     {
-        // PlaySync on a background thread: the stream/player stay alive for
-        // the whole playback (a fire-and-forget Play() would be cut off when
-        // the usings dispose), and the UI thread never blocks.
+        // Keep playback off the UI thread. SoundFeedback selects the
+        // persisted output device (or the system default when empty).
         SoundStatus.Text = "Playing test tone…";
         _ = Task.Run(() =>
         {
             try
             {
-                using var stream = new MemoryStream(AudioRecorder.TestToneWav());
-                using var player = new SoundPlayer(stream);
-                player.PlaySync();
+                SoundFeedback.PlayTestTone(_settings);
+                SetSoundStatus("Test tone played ✓");
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() => SoundStatus.Text = $"Speaker test failed: {ex.Message}");
+                Logger.Warning($"speaker test failed: {ex.GetType().Name}");
+                SetSoundStatus("Speaker test failed — check the output device.");
             }
         });
+    }
+
+    private void SetSoundStatus(string message)
+    {
+        try
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => SetSoundStatus(message)));
+                return;
+            }
+
+            SoundStatus.Text = message;
+        }
+        catch
+        {
+            // The settings window may be closing while playback finishes.
+        }
     }
 
     private bool TrySaveSettings(out string? error)
@@ -556,9 +571,9 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
             Saved?.Invoke(_settings);
             return true;
         }
-        catch (Exception ex)
+        catch
         {
-            error = ex.Message;
+            error = "Could not save settings — try again.";
             return false;
         }
     }

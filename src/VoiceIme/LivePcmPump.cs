@@ -7,7 +7,8 @@ namespace VoiceIme;
 
 /// <summary>
 /// Bounded producer/consumer pump feeding <c>LiveSession.SendPcmAsync</c> via a
-/// single-reader drain (serializing its callers, per the Task 1 review note).
+/// single send drain (serialization is preserved; disposal may concurrently
+/// clear queued buffers during cancellation).
 /// The NAudio callback is the writer via <see cref="TryEnqueue"/>; the drain
 /// loop is the sole reader. Queue-full fails the session safely (brief §10);
 /// last-chunk-before-stop is guaranteed by Complete()-then-drain ordering
@@ -21,13 +22,15 @@ internal sealed class LivePcmPump : IAsyncDisposable, IDisposable
     private const int DefaultCapacity = 300;
 
     private readonly Channel<byte[]> _channel;
-    private bool _disposed;
+    private int _disposed;
 
     internal LivePcmPump(int capacity = DefaultCapacity)
     {
         _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(capacity)
         {
-            SingleReader = true,
+            // Disposal can race cancellation with the drain's reader while
+            // queued buffers are being cleared; allow that cleanup reader.
+            SingleReader = false,
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait,
         });
@@ -51,9 +54,28 @@ internal sealed class LivePcmPump : IAsyncDisposable, IDisposable
     internal async Task DrainAsync(Func<byte[], CancellationToken, Task> send, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(send);
-        await foreach (var chunk in _channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+        try
         {
-            await send(chunk, ct).ConfigureAwait(false);
+            await foreach (var chunk in _channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    await send(chunk, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Audio is sensitive and the channel owns this buffer after
+                    // enqueue, including when a socket send/cancellation fails.
+                    Array.Clear(chunk, 0, chunk.Length);
+                }
+            }
+        }
+        finally
+        {
+            while (_channel.Reader.TryRead(out var queued))
+            {
+                Array.Clear(queued, 0, queued.Length);
+            }
         }
     }
 
@@ -63,7 +85,9 @@ internal sealed class LivePcmPump : IAsyncDisposable, IDisposable
     /// </summary>
     internal void Complete()
     {
-        _channel.Writer.Complete();
+        // TryComplete is idempotent and does not throw when teardown paths
+        // race (normal stop, failure abort, and cancellation can all call it).
+        _channel.Writer.TryComplete();
     }
 
     public ValueTask DisposeAsync()
@@ -74,9 +98,8 @@ internal sealed class LivePcmPump : IAsyncDisposable, IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
-        _disposed = true;
         // Complete() releases a reader blocked in DrainAsync once queued
         // chunks are consumed; best-effort, never throws (idempotent).
         try
@@ -85,7 +108,12 @@ internal sealed class LivePcmPump : IAsyncDisposable, IDisposable
         }
         catch (ChannelClosedException)
         {
-            // Already completed by an explicit Complete(); nothing to release.
+            // Already completed by an explicit Complete(); still drain below.
+        }
+
+        while (_channel.Reader.TryRead(out var chunk))
+        {
+            Array.Clear(chunk, 0, chunk.Length);
         }
     }
 }

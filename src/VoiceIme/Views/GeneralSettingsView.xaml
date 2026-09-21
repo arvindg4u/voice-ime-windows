@@ -52,7 +52,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Activation mode" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Saved now; recording still toggles until the new engine lands."
+                        <TextBlock Text="Hold to dictate, use a press-and-release tap, or toggle with each press."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -93,7 +93,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Mute while recording" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Mutes system output so the mic does not pick it up. Stored for now."
+                        <TextBlock Text="Mutes the selected output while the microphone is active."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -107,7 +107,7 @@
                         <TextBlock Text="Speaker test" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock x:Name="SoundStatus"
-                                   Text="Plays a 1-second tone through the default output."
+                                   Text="Plays a 1-second tone through the selected output."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -121,7 +121,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Capture channel" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Stored for now; capture still opens the default device format."
+                        <TextBlock Text="Applied to mono, stereo, or mix-down capture formats."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -143,7 +143,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Output device" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Falls back to the system output when unset. Stored for now; playback still uses the default device."
+                        <TextBlock Text="Falls back to the system output when unset."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>

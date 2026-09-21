@@ -27,6 +27,9 @@ public static class NativeInput
     [DllImport("user32.dll")]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
@@ -76,22 +79,36 @@ public static class NativeInput
 
         try
         {
-            System.Windows.Forms.Clipboard.SetText(text);
-        }
-        catch (Exception ex)
-        {
-            throw new IOException("Couldn't access the clipboard — try again", ex);
-        }
+            try
+            {
+                System.Windows.Forms.Clipboard.SetText(text);
+            }
+            catch (Exception ex)
+            {
+                throw new IOException("Couldn't access the clipboard — try again", ex);
+            }
 
-        // Give the clipboard a beat to settle before the keystroke lands.
-        Thread.Sleep(50);
-        SendChord(PasteChords.ForMethod(method));
-
-        // Restore what the user had (best-effort, never throws).
-        if (previous is not null)
+            // Give the clipboard a beat to settle before the keystroke lands.
+            Thread.Sleep(50);
+            SendChord(PasteChords.ForMethod(method));
+        }
+        finally
         {
-            Thread.Sleep(150);
-            try { System.Windows.Forms.Clipboard.SetDataObject(previous, copy: true); } catch { /* ignore */ }
+            // Restoration must be in finally: SendInput can fail, be
+            // interrupted, or throw while the focused target disappears. A
+            // failed paste must not strand the user's clipboard with our text.
+            if (previous is not null)
+            {
+                try
+                {
+                    Thread.Sleep(150);
+                    System.Windows.Forms.Clipboard.SetDataObject(previous, copy: true);
+                }
+                catch
+                {
+                    /* clipboard restoration is best effort */
+                }
+            }
         }
     }
 
@@ -128,8 +145,38 @@ public static class NativeInput
     private static void SendOrThrow(INPUT[] inputs)
     {
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
-        if (sent != inputs.Length)
-            throw new IOException("Couldn't send keystrokes to the focused window");
+        if (sent == inputs.Length)
+        {
+            return;
+        }
+
+        // SendInput may accept only a prefix. If that prefix contains a
+        // modifier-down event, do a best-effort release so a transient UIPI or
+        // focus failure cannot leave Ctrl/Shift/Alt/Win logically stuck.
+        var accepted = (int)Math.Min(sent, (uint)inputs.Length);
+        var releases = new List<INPUT>();
+        for (var i = accepted - 1; i >= 0; i--)
+        {
+            var key = inputs[i].U.ki;
+            if ((key.dwFlags & KEYEVENTF_KEYUP) == 0)
+            {
+                releases.Add(KeyUp(key.wVk));
+            }
+        }
+
+        if (releases.Count > 0)
+        {
+            try
+            {
+                SendInput((uint)releases.Count, releases.ToArray(), Marshal.SizeOf<INPUT>());
+            }
+            catch
+            {
+                // Preserve the original delivery failure.
+            }
+        }
+
+        throw new IOException("Couldn't send keystrokes to the focused window");
     }
 
     private static INPUT KeyDown(ushort vk) => new()
@@ -153,6 +200,49 @@ public static class NativeInput
     }
 
     public static bool IsHotKeyMessage(int msg) => msg == (int)WM_HOTKEY;
+
+    /// <summary>
+    /// Polls the physical chord because RegisterHotKey delivers WM_HOTKEY for
+    /// the press but has no key-up message. Used only while a hold-style
+    /// activation is recording; toggle mode never polls the keyboard.
+    /// </summary>
+    public static bool IsHotkeyDown(uint modifiers, uint vk)
+    {
+        if (!IsVirtualKeyDown(vk))
+        {
+            return false;
+        }
+
+        if ((modifiers & HotkeyChord.ModControl) != 0
+            && !IsVirtualKeyDown(0x11)) // VK_CONTROL
+        {
+            return false;
+        }
+
+        if ((modifiers & HotkeyChord.ModAlt) != 0
+            && !IsVirtualKeyDown(0x12)) // VK_MENU
+        {
+            return false;
+        }
+
+        if ((modifiers & HotkeyChord.ModShift) != 0
+            && !IsVirtualKeyDown(0x10)) // VK_SHIFT
+        {
+            return false;
+        }
+
+        if ((modifiers & HotkeyChord.ModWin) != 0
+            && !IsVirtualKeyDown(0x5B) // VK_LWIN
+            && !IsVirtualKeyDown(0x5C)) // VK_RWIN
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsVirtualKeyDown(uint vk) =>
+        (GetAsyncKeyState(unchecked((int)vk)) & unchecked((short)0x8000)) != 0;
 
     // Keep MOD_CONTROL visible to callers without exposing raw constants.
     public static uint ModControl => MOD_CONTROL;

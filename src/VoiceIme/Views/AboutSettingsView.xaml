@@ -7,7 +7,7 @@
          ThemeManager), Language group (English-only catalog in v1 — selection
          persists, UI stays English, labeled honestly), App group (version row
          in mono, app-data + log-folder buttons, source link), Acknowledgments
-         group (transcribe.cpp/ggml credit). Donate is intentionally absent.
+         group (runtime and dependency credit). Donate is intentionally absent.
          All brushes and the card/row/button styles resolve from
          Theme/HandyTheme.xaml via DynamicResource. Hosted by MainWindow
          through RegisterSectionView(MainSection.About, view). -->
@@ -115,9 +115,9 @@
             <StackPanel>
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                        <TextBlock Text="ggml" FontWeight="SemiBold" FontSize="13"
+                        <TextBlock Text="Project" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="VoiceIme's local speech-to-text builds on transcribe.cpp and ggml. Thanks to the amazing work by Georgi Gerganov and contributors."
+                        <TextBlock Text="Voice IME uses NAudio for Windows capture/playback, WPF and WinForms for the UI, and the configured Gemini-compatible transcription endpoint."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>

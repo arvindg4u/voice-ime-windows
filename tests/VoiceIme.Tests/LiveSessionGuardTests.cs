@@ -33,4 +33,28 @@ public sealed class LiveSessionGuardTests
         guard.Next();
         Assert.False(guard.IsCurrent(captured));
     }
+
+    [Fact]
+    public void Invalidate_CurrentSession_RejectsLateCallbacks()
+    {
+        var guard = new LiveSessionGuard();
+        var ended = guard.Next();
+
+        guard.Invalidate(ended);
+
+        Assert.False(guard.IsCurrent(ended));
+        Assert.Equal(3, guard.Next());
+    }
+
+    [Fact]
+    public void Invalidate_OldSession_DoesNotRetireNewSession()
+    {
+        var guard = new LiveSessionGuard();
+        var old = guard.Next();
+        var current = guard.Next();
+
+        guard.Invalidate(old);
+
+        Assert.True(guard.IsCurrent(current));
+    }
 }

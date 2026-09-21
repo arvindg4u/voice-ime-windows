@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text;
@@ -39,7 +40,7 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
 {
     private const int ReceiveBufferSize = 8192;
     private readonly ClientWebSocket _socket = new();
-    private bool _disposed;
+    private int _disposed;
 
     public async Task ConnectAsync(Uri uri, CancellationToken ct)
     {
@@ -65,35 +66,60 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
         {
             throw new LiveSocketException("Network error — check connection", ex);
         }
+        finally
+        {
+            Array.Clear(bytes, 0, bytes.Length);
+        }
     }
 
     public async Task<string?> ReceiveTextAsync(CancellationToken ct)
     {
         var buffer = new byte[ReceiveBufferSize];
-        using var message = new MemoryStream();
-        while (true)
+        try
         {
-            var result = await ReceiveSegmentAsync(buffer, ct);
-            if (result.MessageType == WebSocketMessageType.Close)
+            using var message = new MemoryStream();
+            while (true)
             {
-                await ReplyCloseAsync(ct);
-                return null;
+                var result = await ReceiveSegmentAsync(buffer, ct);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    await ReplyCloseAsync(ct);
+                    return null;
+                }
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    while (!result.EndOfMessage)
+                        result = await ReceiveSegmentAsync(buffer, ct);
+                    continue;
+                }
+                message.Write(buffer, 0, result.Count);
+                if (result.EndOfMessage)
+                {
+                    var textBytes = message.ToArray();
+                    try
+                    {
+                        return Encoding.UTF8.GetString(textBytes);
+                    }
+                    finally
+                    {
+                        Array.Clear(textBytes, 0, textBytes.Length);
+                        if (message.TryGetBuffer(out var segment) && segment.Array is not null)
+                        {
+                            Array.Clear(segment.Array, segment.Offset, segment.Count);
+                        }
+                    }
+                }
             }
-            if (result.MessageType == WebSocketMessageType.Binary)
-            {
-                while (!result.EndOfMessage)
-                    result = await ReceiveSegmentAsync(buffer, ct);
-                continue;
-            }
-            message.Write(buffer, 0, result.Count);
-            if (result.EndOfMessage)
-                return Encoding.UTF8.GetString(message.ToArray());
+        }
+        finally
+        {
+            Array.Clear(buffer, 0, buffer.Length);
         }
     }
 
     public async Task CloseAsync(CancellationToken ct)
     {
-        if (_disposed)
+        if (Volatile.Read(ref _disposed) != 0)
             return;
         try
         {
@@ -110,9 +136,8 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
 
     public ValueTask DisposeAsync()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return ValueTask.CompletedTask;
-        _disposed = true;
         _socket.Abort();
         _socket.Dispose();
         return ValueTask.CompletedTask;

@@ -279,8 +279,7 @@ public sealed class DictationCoordinator : IDisposable
         }
 
         State = DictationState.Error;
-        ErrorRaised?.Invoke(
-            error ?? new RecordingError(RecordingErrorReason.Unknown), cause);
+        RaiseError(error ?? new RecordingError(RecordingErrorReason.Unknown), cause);
     }
 
     /// <summary>
@@ -334,7 +333,7 @@ public sealed class DictationCoordinator : IDisposable
         }
 
         State = DictationState.Error;
-        ErrorRaised?.Invoke(error, cause);
+        RaiseError(error, cause);
         return true;
     }
 
@@ -374,7 +373,14 @@ public sealed class DictationCoordinator : IDisposable
             State = DictationState.Idle;
         }
 
-        OperationCancelled?.Invoke();
+        try
+        {
+            OperationCancelled?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"cancel notification failed: {ex.GetType().Name}");
+        }
     }
 
     /// <summary>Dismisses the error display back to Idle after the host showed it.</summary>
@@ -386,17 +392,42 @@ public sealed class DictationCoordinator : IDisposable
         }
     }
 
+    private void RaiseError(IDictationError error, Exception? cause)
+    {
+        try
+        {
+            ErrorRaised?.Invoke(error, cause);
+        }
+        catch (Exception ex)
+        {
+            // A presentation subscriber must not turn a settled pipeline into
+            // an unobserved exception. The typed state remains Error for the
+            // host to acknowledge.
+            Logger.Error($"error notification failed: {ex.GetType().Name}");
+        }
+    }
+
     private void BeginSession(DateTime now, bool locked)
     {
         _pressStartUtc = now;
         _locked = locked;
         Generation++;
-        // Disposing the prior session CTS is benign, not a cancel: a token
-        // already handed out keeps whatever cancellation state it had, and
-        // every async continuation re-checks Generation before touching
-        // state, so a late continuation of the old session stays silent.
-        _sessionCts?.Dispose();
-        _sessionCts = new CancellationTokenSource();
+        // A prior session may still have a late transport continuation even
+        // after the state returned to Idle. Cancel it before replacing the
+        // source; generation checks still keep any continuation silent.
+        try
+        {
+            _sessionCts?.Cancel();
+        }
+        catch
+        {
+            // The old source may already be disposing during shutdown.
+        }
+        finally
+        {
+            _sessionCts?.Dispose();
+            _sessionCts = new CancellationTokenSource();
+        }
         State = DictationState.Recording;
     }
 
@@ -408,7 +439,19 @@ public sealed class DictationCoordinator : IDisposable
         }
 
         _disposed = true;
-        _sessionCts?.Dispose();
+        try
+        {
+            _sessionCts?.Cancel();
+        }
+        catch
+        {
+            // Disposal still proceeds if a token source is already torn down.
+        }
+        finally
+        {
+            _sessionCts?.Dispose();
+            _sessionCts = null;
+        }
     }
 
     private sealed record PendingRelease(DateTime Deadline, DateTime ReleasedAt, TimeSpan Threshold);

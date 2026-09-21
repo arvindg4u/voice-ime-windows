@@ -36,4 +36,21 @@ internal sealed class LiveSessionGuard
             return id != 0 && id == _current;
         }
     }
+
+    /// <summary>
+    /// Invalidates an ended session without invalidating a newer session that
+    /// may already have started. This closes the gap between cancellation and
+    /// the next <see cref="Next"/> call: late socket frames from an ended Live
+    /// attempt are stale even when no replacement attempt exists yet.
+    /// </summary>
+    public void Invalidate(long id)
+    {
+        lock (_gate)
+        {
+            if (id != 0 && id == _current)
+            {
+                _current += 1;
+            }
+        }
+    }
 }

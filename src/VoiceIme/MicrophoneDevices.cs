@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NAudio.Wave;
 
@@ -35,5 +36,46 @@ public static class MicrophoneDevices
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// Resolves the persisted product name to its current WaveIn index.
+    /// Device indices can change after unplug/replug. The WaveIn mapper index
+    /// (-1) is the real system/default input; returning it for an empty or
+    /// unavailable selection avoids silently choosing the first microphone.
+    /// </summary>
+    public static int FindIndex(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return -1;
+        }
+
+        try
+        {
+            for (var i = 0; i < WaveIn.DeviceCount; i++)
+            {
+                try
+                {
+                    if (string.Equals(
+                        WaveIn.GetCapabilities(i).ProductName,
+                        name.Trim(),
+                        StringComparison.Ordinal))
+                    {
+                        return i;
+                    }
+                }
+                catch
+                {
+                    // Keep looking if one device is unreadable.
+                }
+            }
+        }
+        catch
+        {
+            // Fall back to WaveIn's mapper/default index.
+        }
+
+        return -1;
     }
 }

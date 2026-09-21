@@ -135,9 +135,11 @@ internal static class LiveProtocol
         {
             if (!TryChild(root.RootElement, "serverContent", "server_content", out var serverContent))
                 return false;
-            if (IsTrue(serverContent, "turnComplete"))
+            if (IsTrue(serverContent, "turnComplete")
+                || IsTrue(serverContent, "turn_complete"))
                 return true;
-            return IsTrue(serverContent, "generationComplete");
+            return IsTrue(serverContent, "generationComplete")
+                || IsTrue(serverContent, "generation_complete");
         }
     }
 
@@ -168,6 +170,7 @@ internal static class LiveProtocol
         var audioFormat = -1;
         var channels = -1;
         var sampleRate = -1;
+        var blockAlign = -1;
         var bitsPerSample = -1;
         var dataOffset = -1;
         var dataLength = -1;
@@ -186,6 +189,7 @@ internal static class LiveProtocol
                 audioFormat = U16(wav, pos + 8);
                 channels = U16(wav, pos + 10);
                 sampleRate = (int)U32(wav, pos + 12);
+                blockAlign = U16(wav, pos + 20);
                 bitsPerSample = U16(wav, pos + 22);
             }
             else if (id == "data")
@@ -198,8 +202,11 @@ internal static class LiveProtocol
 
         if (dataOffset < 0 || dataLength < 0)
             throw new TranscribeException("Invalid audio — try again");
-        if (audioFormat != 1 || channels != 1 || sampleRate != 16000 || bitsPerSample != 16)
+        if (audioFormat != 1 || channels != 1 || sampleRate != 16000
+            || blockAlign != 2 || bitsPerSample != 16)
             throw new TranscribeException("Audio format not supported — try again");
+        if (dataLength % blockAlign != 0)
+            throw new TranscribeException("Invalid audio — try again");
 
         var pcm = new byte[dataLength];
         Buffer.BlockCopy(wav, dataOffset, pcm, 0, dataLength);

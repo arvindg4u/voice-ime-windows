@@ -21,7 +21,7 @@ public sealed class AdvancedSettingsViewTests
     {
         TryRunOnSta(new SettingsStore(), view =>
         {
-            Assert.False(view.StartHiddenChecked == true);
+            Assert.True(view.StartHiddenChecked == true);
             Assert.False(view.AutostartChecked == true);
             Assert.True(view.ShowTrayIconChecked == true);
             Assert.Equal(3, view.ShowOverlayItemCount);

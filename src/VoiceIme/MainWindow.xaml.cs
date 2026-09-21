@@ -9,8 +9,8 @@ namespace VoiceIme;
 
 /// <summary>
 /// Handy shell: 160px sidebar + scrollable section host + status footer.
-/// Per-section Views/* plug in via <see cref="RegisterSectionView"/> (later
-/// tasks) and activate via <see cref="NavigateTo"/>. Close hides to tray;
+/// Per-section Views/* plug in via <see cref="RegisterSectionView"/> and
+/// activate via <see cref="NavigateTo"/>. Close hides to tray;
 /// quit happens only through the tray menu (<see cref="PermitClose"/>).
 /// All brushes come from Theme/HandyTheme.xaml via DynamicResource.
 /// </summary>
@@ -102,9 +102,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shows the section's registered view, or a placeholder until its
-    /// Views/* screen lands. Safe to call before Show(). Must be called on
-    /// the UI thread.
+    /// Shows the section's registered view, or a lightweight fallback when no
+    /// view is registered. Safe to call before Show(). Must be called on the
+    /// UI thread.
     /// </summary>
     public void NavigateTo(MainSection section)
     {
@@ -194,6 +194,13 @@ public partial class MainWindow : Window
     /// <summary>Test seam: whether the first-run hint card is shown.</summary>
     internal bool IsFirstRunHintVisible =>
         FirstRunHintCard.Visibility == Visibility.Visible;
+
+    /// <summary>
+    /// Re-reads the already-bound settings instance after another view saves
+    /// it (for example, a new hotkey or SeenHint value). The banner is display
+    /// state, so refreshing it must not write to disk.
+    /// </summary>
+    internal void RefreshFirstRunHintBanner() => RefreshFirstRunHint();
 
     private void RefreshFirstRunHint()
     {

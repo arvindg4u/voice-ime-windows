@@ -21,7 +21,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Start hidden" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Launch to the tray without showing the window. Stored for now."
+                        <TextBlock Text="Keep the normal launch in the tray; turn this off to open Settings at sign-in."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -34,7 +34,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Start with Windows" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Launch the app at sign-in. Stored for now."
+                        <TextBlock Text="Creates or removes the app's sign-in shortcut."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
@@ -47,7 +47,7 @@
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Show tray icon" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Show the tray icon. Stored for now."
+                        <TextBlock Text="Controls whether the tray icon is visible."
                                    FontSize="12" Foreground="{DynamicResource HandyMidGray}"
                                    TextWrapping="Wrap" />
                     </StackPanel>

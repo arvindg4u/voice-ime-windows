@@ -29,11 +29,28 @@ public sealed class RestTranscriptionTransport : ITranscriptionTransport
         _baseUrl = baseUrl;
     }
 
-    public async Task<TranscriptionResult> TranscribeAsync(TranscriptionRequest request, CancellationToken ct)
+    public async Task<TranscriptionResult> TranscribeAsync(
+        TranscriptionRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.AudioWav);
+        try
+        {
+            ArgumentNullException.ThrowIfNull(request.ApiKeys);
+            return await TranscribeCoreAsync(request, ct);
+        }
+        finally
+        {
+            Array.Clear(request.AudioWav, 0, request.AudioWav.Length);
+        }
+    }
+
+    private async Task<TranscriptionResult> TranscribeCoreAsync(
+        TranscriptionRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         var keys = request.ApiKeys
-            .Select(k => k.Trim())
+            .Select(k => k?.Trim() ?? "")
             .Where(k => k.Length > 0)
             .ToList();
         if (keys.Count == 0)
@@ -57,14 +74,40 @@ public sealed class RestTranscriptionTransport : ITranscriptionTransport
             {
                 response = await _http.SendAsync(httpRequest, ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
             {
+                throw new TranscribeException("Network error — check connection", ex);
+            }
+            catch (Exception ex)
+            {
+                if (ex is OperationCanceledException)
+                {
+                    throw;
+                }
+
                 throw new TranscribeException("Network error — check connection", ex);
             }
 
             using (response)
             {
-                var payload = await response.Content.ReadAsStringAsync(ct);
+                string payload;
+                try
+                {
+                    payload = await response.Content.ReadAsStringAsync(ct);
+                }
+                catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+                {
+                    throw new TranscribeException("Network error — check connection", ex);
+                }
+                catch (Exception ex)
+                {
+                    if (ex is OperationCanceledException)
+                    {
+                        throw;
+                    }
+
+                    throw new TranscribeException("Network error — check connection", ex);
+                }
                 if ((int)response.StatusCode == 429)
                 {
                     last429 = new TranscribeException("Rate limited on all keys — retry later");

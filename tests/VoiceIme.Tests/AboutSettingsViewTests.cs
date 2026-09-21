@@ -10,8 +10,8 @@ namespace VoiceIme.Tests;
 /// station — on headless runners construction throws and the test passes
 /// vacuously (same pattern as <c>MainWindowTests</c>). Full coverage runs on
 /// windows-latest CI. The view is built with a no-op saver so tests never
-/// touch disk or DPAPI. Display + persist only: startup still applies the
-/// system preference until T8 wires theme-at-launch.
+/// touch disk or DPAPI. Display/persist behavior and startup theme preference
+/// are covered by the shell wiring and ThemeManager tests.
 /// </summary>
 [Collection("WpfSta")]
 public sealed class AboutSettingsViewTests

@@ -49,6 +49,12 @@ public sealed class HotkeyWindow : NativeWindow, IDisposable
     /// </summary>
     public bool Register(uint modifiers, uint vk)
     {
+        if (_registered)
+        {
+            NativeInput.TryUnregisterHotKey(Handle, _id);
+            _registered = false;
+        }
+
         _registered = NativeInput.TryRegisterHotKey(Handle, _id, modifiers, vk);
         return _registered;
     }

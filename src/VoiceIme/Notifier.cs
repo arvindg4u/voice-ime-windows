@@ -42,8 +42,20 @@ public sealed class Notifier
         string title,
         string body,
         NotificationSeverity severity = NotificationSeverity.Info,
-        IEnumerable<string>? secrets = null) =>
-        _sink(title, Redact(body, secrets), severity);
+        IEnumerable<string>? secrets = null)
+    {
+        try
+        {
+            _sink(title, Redact(body, secrets), severity);
+        }
+        catch (Exception ex)
+        {
+            // A tray/notification failure must not escape a fire-and-forget
+            // dictation task or hide the coordinator's settled state.
+            System.Diagnostics.Trace.WriteLine(
+                $"[Notifier] sink failed: {ex.GetType().Name}");
+        }
+    }
 
     /// <summary>
     /// Strips every known secret from a message before it reaches the user.

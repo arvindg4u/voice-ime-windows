@@ -6,8 +6,8 @@ namespace VoiceIme;
 /// Capture-channel choice (Handy selected_channel port, Windows subset):
 /// mono, stereo, or mix-down average. Persisted as strings in
 /// <see cref="SettingsStore"/>. Unknown values coerce to <see cref="Mono"/> —
-/// never throw on a bad file. Capture still opens the default device format;
-/// this screen only persists the choice.
+/// never throw on a bad file. <see cref="AudioRecorder"/> applies the choice
+/// to the requested capture format and performs the average mix-down.
 /// </summary>
 public static class AudioChannels
 {

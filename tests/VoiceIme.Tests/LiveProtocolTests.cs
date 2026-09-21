@@ -153,6 +153,14 @@ public sealed class LiveProtocolTests
         Assert.Contains("not supported", ex.Message);
     }
 
+    [Fact]
+    public void WavToMono16kPcm_OddDataChunk_ThrowsTypedError()
+    {
+        var odd = AudioRecorder.PcmToWav(new byte[] { 0x01 }, sampleRate: 16000);
+        var ex = Assert.Throws<TranscribeException>(() => LiveProtocol.WavToMono16kPcm(odd));
+        Assert.Contains("Invalid audio", ex.Message);
+    }
+
     [Theory]
     [InlineData("HTTP/1.1 401 Unauthorized", "Invalid API key", false)]
     [InlineData("HTTP/1.1 403 Forbidden", "Invalid API key", false)]

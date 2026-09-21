@@ -10,9 +10,9 @@ namespace VoiceIme.Views;
 /// Output paste-method dropdown, and the History limit numeric (clamped
 /// 10–500). Viewmodel-less code-behind bound to <see cref="SettingsStore"/>
 /// — every write validates-then-commits and surfaces failures inline, never
-/// throws out of an event handler. Display + persist only: autostart/tray/
-/// overlay behavior and paste delivery stay untouched until T8 wires the
-/// shell (delivery keeps the existing fixed Ctrl+V path).
+/// throws out of an event handler. Saves are applied live by App: autostart,
+/// tray visibility, overlay mode, paste delivery, and history eviction all
+/// follow the stored choices.
 /// Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.Advanced, view).
 /// </summary>
@@ -242,9 +242,9 @@ public partial class AdvancedSettingsView : System.Windows.Controls.UserControl
             Saved?.Invoke(_settings);
             return true;
         }
-        catch (Exception ex)
+        catch
         {
-            error = ex.Message;
+            error = "Could not save settings — try again.";
             return false;
         }
     }

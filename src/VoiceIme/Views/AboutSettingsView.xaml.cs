@@ -16,8 +16,8 @@ namespace VoiceIme.Views;
 /// (mono), app-data + log-folder buttons, source link, and acknowledgments
 /// text. Donate is intentionally absent. Viewmodel-less code-behind bound to
 /// <see cref="SettingsStore"/> — every write validates-then-commits and never
-/// throws out of an event handler. Display + persist only: startup still
-/// applies the system preference until T8 wires theme-at-launch.
+/// throws out of an event handler. Theme selection applies immediately and
+/// startup honors the persisted preference.
 /// Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.About, view).
 /// </summary>

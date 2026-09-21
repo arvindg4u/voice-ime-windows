@@ -35,19 +35,23 @@ public sealed class LiveTranscriptionTransport : ITranscriptionTransport
     public async Task<TranscriptionResult> TranscribeAsync(TranscriptionRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var keys = request.ApiKeys
-            .Select(k => k.Trim())
-            .Where(k => k.Length > 0)
-            .ToList();
-        if (keys.Count == 0)
-            throw new TranscribeException("No API key — open Settings");
-
-        // Typed audio errors surface before any socket is created.
-        var pcm = LiveProtocol.WavToMono16kPcm(request.AudioWav);
-
-        var start = ((request.StartKeyIndex % keys.Count) + keys.Count) % keys.Count;
+        ArgumentNullException.ThrowIfNull(request.AudioWav);
+        byte[]? pcm = null;
         try
         {
+            ArgumentNullException.ThrowIfNull(request.ApiKeys);
+            var keys = request.ApiKeys
+                .Select(k => k?.Trim() ?? "")
+                .Where(k => k.Length > 0)
+                .ToList();
+            if (keys.Count == 0)
+            {
+                throw new TranscribeException("No API key — open Settings");
+            }
+
+            // Typed audio errors surface before any socket is created.
+            pcm = LiveProtocol.WavToMono16kPcm(request.AudioWav);
+            var start = ((request.StartKeyIndex % keys.Count) + keys.Count) % keys.Count;
             for (var i = 0; i < keys.Count; i++)
             {
                 var idx = (start + i) % keys.Count;
@@ -66,13 +70,30 @@ public sealed class LiveTranscriptionTransport : ITranscriptionTransport
                         throw new TranscribeException(fail.Message, fail.Cause);
                 }
             }
+
+            throw new TranscribeException("Rate limited on all keys — retry later");
         }
         catch (TransportFallbackException ex)
         {
             // Safety net: no Live code throws this, so collapse it to a safe failure.
             throw new TranscribeException("Transcription failed — try again", ex);
         }
-        throw new TranscribeException("Rate limited on all keys — retry later");
+        catch (Exception ex) when (
+            ex is not OperationCanceledException
+            && ex is not ArgumentNullException
+            && ex is not TranscribeException)
+        {
+            throw new TranscribeException(Failed, ex);
+        }
+        finally
+        {
+            if (pcm is not null)
+            {
+                Array.Clear(pcm, 0, pcm.Length);
+            }
+
+            Array.Clear(request.AudioWav, 0, request.AudioWav.Length);
+        }
     }
 
     /// <summary>
@@ -126,6 +147,10 @@ public sealed class LiveTranscriptionTransport : ITranscriptionTransport
         catch (TransportFallbackException ex)
         {
             // Safety net: no Live code throws this, so collapse it to a safe failure.
+            return new LiveAttemptOutcome.Fail(Failed, ex);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
             return new LiveAttemptOutcome.Fail(Failed, ex);
         }
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace VoiceIme;
 
@@ -61,19 +62,80 @@ public sealed record RecordingError(RecordingErrorReason Reason) : IDictationErr
 }
 
 /// <summary>
-/// Transcription failed. Wraps the already user-safe
-/// <see cref="TranscribeException"/> message (LlmClient never puts key
-/// material in it); blank messages fall back to a generic string.
+/// Transcription failed. The transport messages are intentionally kept as a
+/// small allowlist: a future transport or a test double must not turn an
+/// arbitrary exception message into user-visible text. Unknown messages fall
+/// back to a generic retry prompt.
 /// </summary>
 public sealed record TranscriptionError(string Message) : IDictationError
 {
-    public string UserMessage =>
-        string.IsNullOrWhiteSpace(Message) ? "Transcription failed — try again" : Message;
+    public string UserMessage => Sanitize(Message);
 
     public static TranscriptionError From(TranscribeException ex)
     {
         ArgumentNullException.ThrowIfNull(ex);
-        return new TranscriptionError(ex.Message);
+        return new TranscriptionError(Sanitize(ex.Message));
+    }
+
+    internal static string Sanitize(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "Transcription failed — try again";
+        }
+
+        var value = message.Trim();
+        if (value is
+            "No API key — open Settings"
+            or "Invalid API key — check Settings"
+            or "Rate limited on all keys — retry later"
+            or "Network error — check connection"
+            or "Timed out — try again"
+            or "Got empty transcript — try again"
+            or "Couldn't understand the response — try again"
+            or "Invalid audio — try again"
+            or "Audio format not supported — try again"
+            or "Transcription failed — try again"
+            or "Server error (HTTP 400) — try again"
+            or "Server error (HTTP 401) — try again"
+            or "Server error (HTTP 403) — try again"
+            or "Server error (HTTP 404) — try again"
+            or "Server error (HTTP 408) — try again"
+            or "Server error (HTTP 429) — try again"
+            or "Server error (HTTP 500) — try again"
+            or "Server error (HTTP 502) — try again"
+            or "Server error (HTTP 503) — try again"
+            or "Server error (HTTP 504) — try again")
+        {
+            return value;
+        }
+
+        if (IsRequestFailure(value) || IsServerFailure(value))
+        {
+            return value;
+        }
+
+        return "Transcription failed — try again";
+    }
+
+    private static bool IsRequestFailure(string value) =>
+        HasThreeDigitCode(value, "Request failed (", ") — try again");
+
+    private static bool IsServerFailure(string value) =>
+        HasThreeDigitCode(value, "Server error (HTTP ", ") — try again");
+
+    private static bool HasThreeDigitCode(string value, string prefix, string suffix)
+    {
+        if (!value.StartsWith(prefix, StringComparison.Ordinal)
+            || !value.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var code = value[prefix.Length..^suffix.Length];
+        return code.Length == 3
+            && code[0] is >= '1' and <= '5'
+            && code.All(static c => c is >= '0' and <= '9');
     }
 }
 

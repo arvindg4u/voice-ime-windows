@@ -157,9 +157,9 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         {
             _saver(_settings);
         }
-        catch (Exception ex)
+        catch
         {
-            StatusText.Text = $"Save failed: {ex.Message}";
+            StatusText.Text = "Save failed: please try again.";
             return false;
         }
 
@@ -179,10 +179,12 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
     {
         TestButton.IsEnabled = false;
         StatusText.Text = "Sending test tone…";
+        byte[]? tone = null;
         try
         {
+            tone = _recordTone();
             var (transcript, _) = await _transcribeAsync(
-                _recordTone(),
+                tone,
                 SplitKeys(KeysBox.Text),
                 BaseUrlBox.Text.Trim(),
                 ModelBox.Text.Trim(),
@@ -192,10 +194,18 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Test failed: {ex.Message}";
+            var message = ex is TranscribeException transcribe
+                ? TranscriptionError.From(transcribe).UserMessage
+                : "Transcription failed — try again";
+            StatusText.Text = $"Test failed: {message}";
         }
         finally
         {
+            if (tone is not null)
+            {
+                Array.Clear(tone, 0, tone.Length);
+            }
+
             TestButton.IsEnabled = true;
         }
     }
@@ -223,7 +233,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
 
     /// <summary>
     /// One key per line; blank lines and surrounding whitespace are dropped.
-    /// Same semantics the legacy SettingsWindow used (and LlmClient re-trims).
+    /// Same semantics the connection fields use (and LlmClient re-trims).
     /// </summary>
     internal static List<string> SplitKeys(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

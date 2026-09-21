@@ -35,6 +35,24 @@ public sealed class ClipboardStoreTests : IDisposable
     }
 
     [Fact]
+    public void ConfiguredLimit_IsAppliedAndPersists()
+    {
+        var path = PathFor("configured.json");
+        var store = new ClipboardStore(path, maxEntries: 3);
+        store.Add("one");
+        store.Add("two");
+        store.Add("three");
+        store.Add("four");
+
+        Assert.Equal(3, store.Limit);
+        Assert.Equal(3, store.Entries.Count);
+
+        var reloaded = new ClipboardStore(path, maxEntries: 3);
+        Assert.Equal(3, reloaded.Entries.Count);
+        Assert.DoesNotContain(reloaded.Entries, e => e.Text == "one");
+    }
+
+    [Fact]
     public void Pinned_SurviveEviction()
     {
         var store = new ClipboardStore(PathFor("c.json"));

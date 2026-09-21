@@ -124,7 +124,7 @@ public sealed class GeminiSettingsViewTests
             view.TestNowAsync().GetAwaiter().GetResult();
 
             Assert.StartsWith("Test failed:", view.StatusMessage, StringComparison.Ordinal);
-            Assert.Contains("boom", view.StatusMessage, StringComparison.Ordinal);
+            Assert.Contains("Transcription failed", view.StatusMessage, StringComparison.Ordinal);
         }, transcribeAsync: (_, _, _, _, _, _) => Task.FromException<(string, int)>(new TranscribeException("boom")));
     }
 

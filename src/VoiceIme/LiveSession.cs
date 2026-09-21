@@ -59,7 +59,7 @@ internal sealed class LiveSession : IAsyncDisposable
     private readonly LiveSessionGuard _guard;
     private readonly long _sessionId;
     private readonly LiveSessionOptions _options;
-    private bool _disposed;
+    private int _disposed;
     private CancellationTokenSource? _sessionCts;
     private bool _activityStarted;
     private bool _completed;
@@ -179,8 +179,13 @@ internal sealed class LiveSession : IAsyncDisposable
         {
             return MapSocketFailure(ex);
         }
+        catch (ObjectDisposedException) when (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(ct);
+        }
         finally
         {
+            _guard.Invalidate(_sessionId);
             using var closeCts = new CancellationTokenSource(_options.CloseGrace);
             try
             {
@@ -190,7 +195,15 @@ internal sealed class LiveSession : IAsyncDisposable
             {
                 // Best-effort close: never mask the attempt outcome.
             }
-            await _socket.DisposeAsync();
+            try
+            {
+                await _socket.DisposeAsync();
+            }
+            catch
+            {
+                // Disposal is best effort and must not replace the attempt
+                // outcome or cancellation exception.
+            }
             Array.Clear(pcm, 0, pcm.Length);
         }
     }
@@ -282,6 +295,11 @@ internal sealed class LiveSession : IAsyncDisposable
             TearDownSession();
             throw;
         }
+        catch (ObjectDisposedException) when (ct.IsCancellationRequested)
+        {
+            TearDownSession();
+            throw new OperationCanceledException(ct);
+        }
     }
 
     /// <summary>
@@ -296,19 +314,26 @@ internal sealed class LiveSession : IAsyncDisposable
     internal async Task SendPcmAsync(byte[] pcmChunk, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(pcmChunk);
-        if (_completed)
-            return;
-        var sessionCts = _sessionCts;
-        if (sessionCts is null)
-            throw new InvalidOperationException("Session is not connected.");
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(sessionCts.Token, ct);
-        var token = linkedCts.Token;
-        if (!_activityStarted)
+        try
         {
-            await _socket.SendTextAsync(LiveProtocol.BuildLiveActivityStartJson(), token);
-            _activityStarted = true;
+            if (_completed)
+                return;
+            var sessionCts = _sessionCts;
+            if (sessionCts is null)
+                throw new InvalidOperationException("Session is not connected.");
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(sessionCts.Token, ct);
+            var token = linkedCts.Token;
+            if (!_activityStarted)
+            {
+                await _socket.SendTextAsync(LiveProtocol.BuildLiveActivityStartJson(), token);
+                _activityStarted = true;
+            }
+            await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioMessage(pcmChunk), token);
         }
-        await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioMessage(pcmChunk), token);
+        finally
+        {
+            Array.Clear(pcmChunk, 0, pcmChunk.Length);
+        }
     }
 
     /// <summary>
@@ -355,6 +380,10 @@ internal sealed class LiveSession : IAsyncDisposable
         {
             return MapSocketFailure(ex);
         }
+        catch (ObjectDisposedException) when (ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(ct);
+        }
         finally
         {
             TearDownSession();
@@ -364,11 +393,17 @@ internal sealed class LiveSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
-        _disposed = true;
         TearDownSession();
-        await _socket.DisposeAsync();
+        try
+        {
+            await _socket.DisposeAsync();
+        }
+        catch
+        {
+            // Best effort during cancellation/shutdown.
+        }
     }
 
     /// <summary>
@@ -380,17 +415,23 @@ internal sealed class LiveSession : IAsyncDisposable
     private void TearDownSession()
     {
         var sessionCts = Interlocked.Exchange(ref _sessionCts, null);
-        if (sessionCts is null)
-            return;
-        try
+        if (sessionCts is not null)
         {
-            sessionCts.Cancel();
+            try
+            {
+                sessionCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Cancel-after-dispose race from a concurrent teardown; already gone.
+            }
+            sessionCts.Dispose();
         }
-        catch (ObjectDisposedException)
-        {
-            // Cancel-after-dispose race from a concurrent teardown; already gone.
-        }
-        sessionCts.Dispose();
+
+        // Also invalidate setup-only/disposed sessions that have no CTS left.
+        // Invalidate is conditional, so an old teardown cannot retire a newer
+        // session that has already claimed the guard.
+        _guard.Invalidate(_sessionId);
     }
 
     /// <summary>
@@ -409,7 +450,14 @@ internal sealed class LiveSession : IAsyncDisposable
         {
             // Best-effort close: never mask the attempt outcome.
         }
-        await _socket.DisposeAsync();
+        try
+        {
+            await _socket.DisposeAsync();
+        }
+        catch
+        {
+            // Close is best effort; never mask the transcript outcome.
+        }
     }
 
     /// <summary>
@@ -447,8 +495,15 @@ internal sealed class LiveSession : IAsyncDisposable
         {
             var length = Math.Min(LiveProtocol.ChunkBytes, pcm.Length - offset);
             var chunk = new byte[length];
-            Buffer.BlockCopy(pcm, offset, chunk, 0, length);
-            await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioMessage(chunk), ct);
+            try
+            {
+                Buffer.BlockCopy(pcm, offset, chunk, 0, length);
+                await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioMessage(chunk), ct);
+            }
+            finally
+            {
+                Array.Clear(chunk, 0, chunk.Length);
+            }
         }
         await _socket.SendTextAsync(LiveProtocol.BuildLiveActivityEndJson(), ct);
         await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioEndJson(), ct);
@@ -544,7 +599,9 @@ internal sealed class LiveSession : IAsyncDisposable
     {
         if (IsRotateSignal(ex))
             return new LiveAttemptOutcome.Rotate();
-        return new LiveAttemptOutcome.Fail(ex.Message, ex);
+        // Never expose socket/URI details: handshake errors can include the
+        // API-key query string or server-provided text.
+        return new LiveAttemptOutcome.Fail(NetworkError, ex);
     }
 
     private static bool IsRotateSignal(LiveSocketException ex) =>

@@ -33,6 +33,13 @@ public sealed class AudioRecorderTests
     }
 
     [Fact]
+    public void ComputePeak_HandlesShortMinimumWithoutOverflow()
+    {
+        // 0x8000 is Int16.MinValue; Math.Abs((short)-32768) would throw.
+        Assert.Equal(1f, AudioRecorder.ComputePeak([0x00, 0x80], 2));
+    }
+
+    [Fact]
     public void Magnitude_ZeroIsZero_AndClampedToOne()
     {
         Assert.Equal(0f, AudioRecorder.Magnitude(0f));

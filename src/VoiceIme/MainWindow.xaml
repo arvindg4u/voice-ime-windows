@@ -7,8 +7,8 @@
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource HandyBackground}">
     <!-- Handy shell (Task 2): fixed 160px sidebar + scrollable content + footer.
-         Per-section Views/* UserControls plug into SectionHost via NavigateTo
-         (Tasks 3-5). Until then each section shows a placeholder. -->
+         Per-section Views/* UserControls plug into SectionHost via NavigateTo;
+         an unregistered section retains a lightweight fallback placeholder. -->
     <Window.Resources>
         <!-- Sidebar nav item: transparent, 8px radius. Active = pink overlay
              @80% (reference bg-logo-primary/80); inactive hover = gray @20%

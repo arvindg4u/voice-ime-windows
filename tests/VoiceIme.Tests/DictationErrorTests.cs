@@ -72,6 +72,26 @@ public sealed class DictationErrorTests
     }
 
     [Fact]
+    public void TranscriptionError_UnknownTransportMessage_IsNotPresented()
+    {
+        var error = TranscriptionError.From(
+            new TranscribeException("https://example.test?key=SECRETKEY path=/private/file"));
+
+        Assert.Equal("Transcription failed — try again", error.UserMessage);
+        Assert.DoesNotContain("SECRETKEY", error.UserMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("/private/file", error.UserMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TranscriptionError_DynamicHttpStatus_RemainsSafe()
+    {
+        var error = TranscriptionError.From(
+            new TranscribeException("Request failed (418) — try again"));
+
+        Assert.Equal("Request failed (418) — try again", error.UserMessage);
+    }
+
+    [Fact]
     public void PasteError_PointsAtHistory()
     {
         IDictationError error = new PasteError();

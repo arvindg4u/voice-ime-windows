@@ -184,7 +184,7 @@ public sealed class SettingsStoreTests
             Assert.False(loaded.MuteWhileRecording);
 
             // Assert: T1 advanced fields.
-            Assert.False(loaded.StartHidden);
+            Assert.True(loaded.StartHidden);
             Assert.False(loaded.Autostart);
             Assert.True(loaded.ShowTrayIcon);
             Assert.Equal(OverlayModes.Full, loaded.ShowOverlay);
@@ -828,7 +828,7 @@ public sealed class SettingsStoreTests
 
             var loaded = SettingsStore.Load();
 
-            Assert.False(loaded.StartHidden);
+            Assert.True(loaded.StartHidden);
             Assert.False(loaded.Autostart);
             Assert.True(loaded.ShowTrayIcon);
             Assert.Equal(OverlayModes.Full, loaded.ShowOverlay);

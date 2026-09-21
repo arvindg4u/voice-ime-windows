@@ -5,8 +5,8 @@ namespace VoiceIme;
 /// <summary>
 /// Activation modes for the dictation hotkey (Handy shortcut_activation
 /// port). Persisted as strings in <see cref="SettingsStore"/>. v1 behavior
-/// is toggle for every mode — the Task 8 coordinator makes the other modes
-/// live; this screen only persists the choice.
+/// is implemented by <see cref="DictationCoordinator"/> for hold-or-toggle,
+/// push-to-talk, and toggle sessions.
 /// </summary>
 public static class ActivationModes
 {

@@ -31,11 +31,15 @@ public partial class App : System.Windows.Application
     private readonly AudioRecorder _recorder = new();
     private readonly LlmClient _llm = new();
     private SettingsStore _settings = SettingsStore.Load();
-    private readonly ClipboardStore _clips = new();
+    private readonly ClipboardStore _clips = new(maxEntries: _settings.HistoryLimit);
     private readonly DictationCoordinator _coordinator = new();
+    private IDisposable? _recordingMute;
     private OverlayWindow? _overlay;
     private DispatcherTimer? _releaseTimer;
     private SingleInstance? _singleInstance;
+    private bool _hotkeyPhysicalDown;
+    private uint _hotkeyModifiers;
+    private uint _hotkeyVirtualKey;
 
     // Task 5 Live streaming state. The pump buffers recorder chunks pre-ACK
     // (brief §6 ruling); the drain starts only after ConnectAndSetupAsync
@@ -64,6 +68,7 @@ public partial class App : System.Windows.Application
     /// failed session never finalizes or pastes, even if stop wins the race.
     /// </summary>
     private volatile bool _liveFailed;
+    private long _liveFailedGeneration;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -81,15 +86,17 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
         _settings = SettingsStore.Load();
+        ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(_settings.Theme));
+        _clips.SetLimit(_settings.HistoryLimit);
         _recorder.AutoStopped += HandleAutoStop;
-        _recorder.LevelChanged += level =>
-            _overlay?.SetLevel(SoundFeedback.ApplyDisplayGain(level, _settings.Volume));
+        _recorder.LevelChanged += HandleRecorderLevelChanged;
         _coordinator.ErrorRaised += HandleError;
         _coordinator.OperationCancelled += () =>
         {
+            _hotkeyPhysicalDown = false;
             DisarmCancelHotkey();
+            RestoreRecordingMute();
             _overlay?.Hide();
             RefreshMenu();
             SetTray("Voice IME — ready");
@@ -104,8 +111,10 @@ public partial class App : System.Windows.Application
         };
         _releaseTimer.Tick += (_, _) =>
         {
+            PollHotkeyRelease();
             if (_coordinator.Tick() == HotkeyCommand.StopRecording)
             {
+                _hotkeyPhysicalDown = false;
                 _ = StopAndTranscribeAsync();
             }
         };
@@ -130,11 +139,19 @@ public partial class App : System.Windows.Application
         // shortcut against Autostart, then enforce the tray guard. The guard
         // runs after shortcut reconcile — an icon-off + hidden-window start
         // must surface the window so the app is never stranded invisible.
-        // StartHidden itself needs no window call: OnStartup never creates a
-        // window (MainWindow only builds on demand in OpenSettings/
-        // OpenHistory), so tray launch is the default.
+        // The normal product launch is tray-first. Users who turn off Start
+        // hidden get the settings shell on the next launch; the guard below
+        // still surfaces a window when the tray icon is disabled so the app
+        // can never become unreachable.
         ReconcileAutostart();
         EnforceTrayGuard();
+        if (!_settings.StartHidden)
+        {
+            _mainWindow ??= CreateMainWindow();
+            AttachLiveHotkey(_mainWindow);
+            RefreshSectionViews(_mainWindow, _settings, _clips);
+            ShowMainWindow();
+        }
     }
 
     /// <summary>
@@ -151,7 +168,7 @@ public partial class App : System.Windows.Application
         var menu = new ContextMenuStrip();
         var busy = _coordinator.State is DictationState.Recording or DictationState.Uploading;
         var version = GetType().Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
-        var hasTranscript = _clips.Entries.Any(e => !string.IsNullOrEmpty(e.Text));
+        var hasTranscript = _clips.Entries.Any(e => !string.IsNullOrWhiteSpace(e.Text));
         foreach (var item in TrayMenu.Items(busy, "v" + version, hasTranscript))
         {
             menu.Items.Add(TranslateMenuItem(item));
@@ -203,8 +220,8 @@ public partial class App : System.Windows.Application
 
     private void CopyLastTranscript()
     {
-        var latest = _clips.Entries.Count > 0 ? _clips.Entries[0] : null;
-        if (latest is null || string.IsNullOrEmpty(latest.Text))
+        var latest = _clips.Entries.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Text));
+        if (latest is null)
         {
             return;
         }
@@ -227,14 +244,24 @@ public partial class App : System.Windows.Application
     };
 
     /// <summary>
-    /// Global hotkey delivers press edges only (WM_HOTKEY has no key-up), so
-    /// it feeds <see cref="DictationCoordinator.OnHotkeyDown"/>. In toggle
-    /// mode (the default) press starts / press stops; in hold modes the first
-    /// press starts and stopping uses the overlay/tray Cancel affordances (or
-    /// a future key hook feeding OnHotkeyUp) — cancel always drains to Idle.
+    /// Global hotkey delivers the press edge through WM_HOTKEY. The release is
+    /// reconciled by <see cref="PollHotkeyRelease"/> for hold-style modes;
+    /// toggle mode simply flips on each press. Tray/overlay cancellation still
+    /// uses the coordinator's single cancel path.
     /// </summary>
     private void HandleHotkeyPress()
     {
+        if (!HotkeyChord.TryParse(_settings.Hotkey, out _hotkeyModifiers, out _hotkeyVirtualKey))
+        {
+            _hotkeyPhysicalDown = false;
+            _hotkeyModifiers = 0;
+            _hotkeyVirtualKey = 0;
+        }
+        else
+        {
+            _hotkeyPhysicalDown = true;
+        }
+
         _coordinator.ActivationMode = _settings.ActivationMode;
         switch (_coordinator.OnHotkeyDown())
         {
@@ -242,9 +269,48 @@ public partial class App : System.Windows.Application
                 _ = StartRecordingAsync();
                 break;
             case HotkeyCommand.StopRecording:
+                _hotkeyPhysicalDown = false;
                 _ = StopAndTranscribeAsync();
                 break;
+            default:
+                if (_coordinator.State != DictationState.Recording)
+                {
+                    _hotkeyPhysicalDown = false;
+                }
+                break;
         }
+    }
+
+    /// <summary>
+    /// RegisterHotKey has no key-up notification. While recording in a
+    /// hold-style activation, poll the physical chord and forward its first
+    /// release to the coordinator; <see cref="DictationCoordinator.Tick"/>
+    /// then applies the hold threshold/release grace. This keeps toggle mode
+    /// free of keyboard polling and gives tray-started sessions no phantom
+    /// release edge.
+    /// </summary>
+    private void PollHotkeyRelease()
+    {
+        if (!_hotkeyPhysicalDown)
+        {
+            return;
+        }
+
+        if (_coordinator.State != DictationState.Recording)
+        {
+            _hotkeyPhysicalDown = false;
+            return;
+        }
+
+        _coordinator.ActivationMode = _settings.ActivationMode;
+        if (_coordinator.ActivationMode == ActivationModes.Toggle
+            || NativeInput.IsHotkeyDown(_hotkeyModifiers, _hotkeyVirtualKey))
+        {
+            return;
+        }
+
+        _hotkeyPhysicalDown = false;
+        _coordinator.OnHotkeyUp();
     }
 
     /// <summary>
@@ -253,6 +319,7 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void HandleToggleInput()
     {
+        _hotkeyPhysicalDown = false;
         _coordinator.ActivationMode = _settings.ActivationMode;
         switch (_coordinator.OnToggleInput())
         {
@@ -265,8 +332,41 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void HandleRecorderLevelChanged(float level)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() => HandleRecorderLevelChanged(level)));
+            }
+            catch
+            {
+                // The dispatcher may already be shutting down.
+            }
+
+            return;
+        }
+
+        _overlay?.SetLevel(SoundFeedback.ApplyDisplayGain(level, _settings.Volume));
+    }
+
     private void HandleAutoStop()
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(HandleAutoStop));
+            }
+            catch
+            {
+                // The dispatcher may already be shutting down.
+            }
+
+            return;
+        }
+
         if (_coordinator.OnAutoStop() == HotkeyCommand.StopRecording)
         {
             _ = StopAndTranscribeAsync();
@@ -294,6 +394,12 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (_settings.MuteWhileRecording)
+        {
+            _recordingMute?.Dispose();
+            _recordingMute = AudioOutputMute.TryMute(_settings.OutputDevice);
+        }
+
         // Live models buffer recorder chunks through the pump from the first
         // callback (brief §6: never lose the beginning of speech). The pump
         // and handler are published before capture starts; teardown on any
@@ -307,14 +413,22 @@ public partial class App : System.Windows.Application
             pcmHandler = chunk =>
             {
                 if (!pump.TryEnqueue(chunk))
+                {
+                    Array.Clear(chunk, 0, chunk.Length);
                     FailLiveSession(generation, new TranscriptionError("Transcription failed — try again"));
+                }
             };
             _recorder.PcmChunkAvailable += pcmHandler;
         }
 
         try
         {
-            await Task.Run(() => _recorder.Start(), token);
+            var microphoneIndex = MicrophoneDevices.FindIndex(_settings.Microphone);
+            // Gemini Live requires mono 16 kHz PCM. The recorder therefore
+            // uses mono for Live; the REST/Interactions WAV path honors the
+            // selected channel below.
+            var channel = live ? AudioChannels.Mono : _settings.Channel;
+            await Task.Run(() => _recorder.Start(microphoneIndex, channel), token);
             Logger.LogLatency("hotkey_to_capture", DateTimeOffset.UtcNow - hotkeyAt);
         }
         catch (OperationCanceledException)
@@ -322,11 +436,13 @@ public partial class App : System.Windows.Application
             // User cancelled before capture started — CancelCurrentOperation
             // already drained to idle; reconciling here would stick UI.
             TeardownLivePump(pump, pcmHandler);
+            RestoreRecordingMute();
             _coordinator.NotifyUploadCancelled(generation);
         }
         catch (Exception ex)
         {
             TeardownLivePump(pump, pcmHandler);
+            RestoreRecordingMute();
             _coordinator.ReportStartResult(
                 generation, false, RecordingError.FromException(ex), ex);
         }
@@ -337,15 +453,30 @@ public partial class App : System.Windows.Application
             && !token.IsCancellationRequested)
         {
             await StartLiveSessionAsync(pump, pcmHandler, generation, token);
+            var stopOwnsUpload = generation == _coordinator.Generation
+                && _coordinator.State == DictationState.Uploading
+                && !token.IsCancellationRequested;
+            if ((_coordinator.State != DictationState.Recording || _liveFailed) && !stopOwnsUpload)
+            {
+                // Setup failure/cancellation happened after the microphone
+                // opened; close it and restore any temporary output mute.
+                _recorder.Cancel();
+                RestoreRecordingMute();
+            }
         }
         else
         {
             TeardownLivePump(pump, pcmHandler);
+            if (_coordinator.State != DictationState.Recording)
+            {
+                RestoreRecordingMute();
+            }
         }
     }
 
     private async Task StopAndTranscribeAsync()
     {
+        _hotkeyPhysicalDown = false;
         if (_coordinator.State != DictationState.Uploading) return;
         var generation = _coordinator.Generation;
         var token = _coordinator.SessionToken;
@@ -368,52 +499,72 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // If the model changed while a Live session was recording, the WAV
+        // fallback below is intentional, but the old pump/socket must first be
+        // stopped so it cannot continue sending audio or retain a queue.
+        if (_livePump is not null || _liveSession is not null || _liveSetup is not null)
+        {
+            await AbandonLiveSessionAsync();
+        }
+
         var stopAt = DateTimeOffset.UtcNow;
         byte[] wav;
         try
         {
             wav = await _recorder.StopAsync(token);
-            token.ThrowIfCancellationRequested();
+            RestoreRecordingMute();
         }
         catch (OperationCanceledException)
         {
+            RestoreRecordingMute();
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
         catch (Exception ex)
         {
+            RestoreRecordingMute();
             _coordinator.ReportUploadFailed(
                 generation, new RecordingError(RecordingErrorReason.Unknown), ex);
             return;
         }
 
-        // Stage gate: a cancel that landed after StopAsync must not upload.
-        if (token.IsCancellationRequested)
+        try
         {
-            _coordinator.NotifyUploadCancelled(generation);
-            return;
-        }
-
-        Logger.LogLatency("capture_to_stop", DateTimeOffset.UtcNow - stopAt);
-
-        // Empty audio (or a late stop from an ended session) discards — but a
-        // cancelled-while-stopping session must not touch status text.
-        if (_coordinator.ReportAudioCaptured(wav) == AudioCaptureOutcome.Discarded)
-        {
+            // Stage gate: a cancel that landed after StopAsync must not upload.
             if (token.IsCancellationRequested)
             {
                 _coordinator.NotifyUploadCancelled(generation);
                 return;
             }
 
-            DisarmCancelHotkey();
-            RefreshMenu();
-            _overlay?.Hide();
-            SetTray("Voice IME — no audio captured");
-            return;
-        }
+            Logger.LogLatency("capture_to_stop", DateTimeOffset.UtcNow - stopAt);
 
-        await TranscribeAndPasteAsync(wav, generation, token);
+            // Empty audio (or a late stop from an ended session) discards — but a
+            // cancelled-while-stopping session must not touch status text.
+            if (_coordinator.ReportAudioCaptured(wav) == AudioCaptureOutcome.Discarded)
+            {
+                if (token.IsCancellationRequested)
+                {
+                    _coordinator.NotifyUploadCancelled(generation);
+                    return;
+                }
+
+                DisarmCancelHotkey();
+                RefreshMenu();
+                _overlay?.Hide();
+                SetTray("Voice IME — no audio captured");
+                return;
+            }
+
+            await TranscribeAndPasteAsync(wav, generation, token);
+        }
+        finally
+        {
+            // The WAV is needed only until the transport returns. Do not leave
+            // microphone data in a managed array on success, failure, or
+            // cancellation, including discarded/late-stop paths.
+            Array.Clear(wav, 0, wav.Length);
+        }
     }
 
     /// <summary>
@@ -432,6 +583,7 @@ public partial class App : System.Windows.Application
         var transcribeAt = DateTimeOffset.UtcNow;
         try
         {
+            _settings.ApiKeys = SettingsStore.NormalizeApiKeys(_settings.ApiKeys);
             (transcript, usedIndex) = await _llm.TranscribeAsync(
                 wav, _settings.ApiKeys, _settings.BaseUrl, _settings.Model,
                 _settings.KeyCursor, _settings.ActivePromptText, _settings.SmartMode, ct: token);
@@ -458,14 +610,15 @@ public partial class App : System.Windows.Application
             // audio is never persisted). The live History view picks up the
             // error text when it exists; otherwise the row still clears with
             // the store and shows a generic message when the view opens.
+            var safeError = TranscriptionError.From(ex);
             var failed = _clips.Add(string.Empty);
             if (_mainWindow?.SectionView(MainSection.History)
                 is Views.HistorySettingsView history)
             {
-                history.AttachError(failed.Id, ex.Message);
+                history.AttachError(failed.Id, safeError.UserMessage);
             }
 
-            _coordinator.ReportUploadFailed(generation, TranscriptionError.From(ex), ex);
+            _coordinator.ReportUploadFailed(generation, safeError, ex);
             return;
         }
         catch (Exception ex)
@@ -505,10 +658,21 @@ public partial class App : System.Windows.Application
     private void CommitTranscript(
         string transcript, int usedIndex, long generation, CancellationToken token, DateTimeOffset transcribeAt)
     {
+        _settings.ApiKeys = SettingsStore.NormalizeApiKeys(_settings.ApiKeys);
         _settings.KeyCursor = (_settings.ApiKeys.Count == 0)
             ? 0
             : (usedIndex + 1) % _settings.ApiKeys.Count;
-        _settings.Save();
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception saveEx)
+        {
+            // A successful transcription must still paste and settle the
+            // coordinator if settings storage is temporarily unavailable.
+            // Log only the exception type; never expose paths or key material.
+            Logger.Error($"settings save after transcript failed: {saveEx.GetType().Name}");
+        }
         Logger.LogLatency("capture_to_response", DateTimeOffset.UtcNow - transcribeAt);
         Logger.LogKeyUsed(usedIndex, _settings.ApiKeys);
         Logger.LogTranscriptReceived(transcript.Length);
@@ -567,18 +731,20 @@ public partial class App : System.Windows.Application
         _liveFinals = string.Empty;
         _liveInterim = string.Empty;
         _liveFailed = false;
+        _liveFailedGeneration = 0;
         _liveDrainStarted = false;
         _liveSetup = null;
         _liveDrain = null;
 
         var keys = _settings.ApiKeys
-            .Select(k => k.Trim())
+            .Select(k => k?.Trim() ?? "")
             .Where(k => k.Length > 0)
             .ToList();
         if (keys.Count == 0)
         {
             TeardownLivePump(pump, handler);
             ClearLiveFields();
+            RetireLiveGeneration(generation);
             _coordinator.ReportStartResult(
                 generation, false, new TranscriptionError("No API key — open Settings"));
             return;
@@ -586,31 +752,66 @@ public partial class App : System.Windows.Application
 
         var keyIndex = ((_settings.KeyCursor % keys.Count) + keys.Count) % keys.Count;
         _liveKeyIndex = keyIndex;
-        var session = new LiveSession(
-            _llm.LiveSocketsForTests?.Create() ?? new ClientWebSocketLiveSocket(),
-            _settings.Model, _settings.SmartMode, _liveGuard, _liveGuard.Next());
-        session.InterimReceived += text => PublishLivePreview(text, false);
-        session.FinalReceived += delta => PublishLivePreview(delta, true);
-        _liveSession = session;
-        var uri = LiveProtocol.BuildLiveUri(LiveProtocol.LiveHost(_settings.BaseUrl), keys[keyIndex]);
-        var setup = session.ConnectAndSetupAsync(uri, token);
-        _liveSetup = setup;
-
+        LiveSession? session = null;
         bool connected;
         try
         {
+            session = new LiveSession(
+                _llm.LiveSocketsForTests?.Create() ?? new ClientWebSocketLiveSocket(),
+                _settings.Model, _settings.SmartMode, _liveGuard, _liveGuard.Next());
+            session.InterimReceived += text => PublishLivePreview(generation, text, false);
+            session.FinalReceived += delta => PublishLivePreview(generation, delta, true);
+            _liveSession = session;
+            var uri = LiveProtocol.BuildLiveUri(LiveProtocol.LiveHost(_settings.BaseUrl), keys[keyIndex]);
+            var setup = session.ConnectAndSetupAsync(uri, token);
+            _liveSetup = setup;
             connected = await setup;
         }
         catch (OperationCanceledException)
         {
+            var stopOwnsUpload = generation == _coordinator.Generation
+                && _coordinator.State == DictationState.Uploading
+                && !token.IsCancellationRequested;
             TeardownLivePump(pump, handler);
             await DisposeLiveSessionQuietly(session);
             ClearLiveFields();
-            _coordinator.NotifyUploadCancelled(generation);
+            if (!stopOwnsUpload)
+            {
+                RetireLiveGeneration(generation);
+                _coordinator.NotifyUploadCancelled(generation);
+            }
+
+            return;
+        }
+        catch (Exception ex)
+        {
+            var stopOwnsUpload = generation == _coordinator.Generation
+                && _coordinator.State == DictationState.Uploading
+                && !token.IsCancellationRequested;
+            TeardownLivePump(pump, handler);
+            await DisposeLiveSessionQuietly(session);
+            ClearLiveFields();
+            if (!stopOwnsUpload)
+            {
+                RetireLiveGeneration(generation);
+                _coordinator.ReportStartResult(
+                    generation, false, new TranscriptionError("Transcription failed — try again"), ex);
+            }
+
             return;
         }
 
-        if (!connected
+        // If the stop edge won while setup was in flight, its WAV fallback
+        // owns teardown and should see the original pump/session snapshot.
+        if (generation == _coordinator.Generation
+            && _coordinator.State == DictationState.Uploading
+            && !token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (session is null
+            || !connected
             || _liveFailed
             || generation != _coordinator.Generation
             || _coordinator.State != DictationState.Recording
@@ -619,6 +820,11 @@ public partial class App : System.Windows.Application
             TeardownLivePump(pump, handler);
             await DisposeLiveSessionQuietly(session);
             ClearLiveFields();
+            if (!_liveFailed)
+            {
+                RetireLiveGeneration(generation);
+            }
+
             if (!connected
                 && !_liveFailed
                 && generation == _coordinator.Generation
@@ -700,11 +906,33 @@ public partial class App : System.Windows.Application
     /// the Dispatcher (session events fire on the drain/reader path), which
     /// also serializes concurrent interim/final arrivals in order.
     /// </summary>
-    private void PublishLivePreview(string text, bool isFinal)
+    private void PublishLivePreview(long generation, string text, bool isFinal)
     {
+        if (generation != _coordinator.Generation
+            || _coordinator.State is DictationState.Idle or DictationState.Error)
+        {
+            return;
+        }
+
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(() => PublishLivePreview(text, isFinal));
+            try
+            {
+                Dispatcher.BeginInvoke(() => PublishLivePreview(generation, text, isFinal));
+            }
+            catch
+            {
+                // The dispatcher may already be shutting down.
+            }
+
+            return;
+        }
+
+        // Re-check after marshaling: the session may have been cancelled or
+        // committed while this preview waited in the dispatcher queue.
+        if (generation != _coordinator.Generation
+            || _coordinator.State is DictationState.Idle or DictationState.Error)
+        {
             return;
         }
 
@@ -723,22 +951,82 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void FailLiveSession(long generation, TranscriptionError error)
     {
-        _liveFailed = true;
-        if (!Dispatcher.CheckAccess())
+        // A detached callback from an older pump must not poison a newer
+        // session's failure latch.
+        if (generation != _liveGeneration)
         {
-            Dispatcher.BeginInvoke(() => FailLiveSession(generation, error));
             return;
         }
 
-        if (generation != _liveGeneration || !_liveFailed)
+        // Publish the generation before the volatile latch so a reader that
+        // observes the latch also observes which session failed.
+        _liveFailedGeneration = generation;
+        _liveFailed = true;
+        if (!Dispatcher.CheckAccess())
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(() => FailLiveSession(generation, error));
+            }
+            catch
+            {
+                // The dispatcher may already be shutting down.
+            }
+
+            return;
+        }
+
+        if (generation != _liveGeneration
+            || _liveFailedGeneration != generation
+            || !_liveFailed)
             return;
         _liveFailed = false;
+        _liveFailedGeneration = 0;
         DetachLivePump();
+        var pump = _livePump;
         var session = _liveSession;
+        var setup = _liveSetup;
+        var drain = _liveDrain;
         ClearLiveFields();
-        _ = DisposeLiveSessionQuietly(session);
+        _liveGeneration = 0;
+
+        // Stop accepting producer data and cancel the linked Live token before
+        // cleanup. The background drain is awaited by the helper below, so a
+        // pump-full/error callback cannot dispose resources under an active
+        // consumer or let a stale send race a later session.
+        pump?.Complete();
         _coordinator.CancelCurrentOperation();
+        _recorder.Cancel();
+        RestoreRecordingMute();
         HandleError(error);
+        _ = FinishFailedLiveCleanupAsync(pump, session, setup, drain);
+    }
+
+    private static async Task FinishFailedLiveCleanupAsync(
+        LivePcmPump? pump, LiveSession? session, Task<bool>? setup, Task? drain)
+    {
+        // Always yield before awaiting the captured drain. A drain can report
+        // its own failure from inside RunLiveDrainAsync; yielding prevents this
+        // cleanup task from ever awaiting that same task before it returns.
+        await Task.Yield();
+        try
+        {
+            pump?.Complete();
+            if (setup is not null)
+            {
+                try { await setup; } catch { /* failure cleanup is best effort */ }
+            }
+
+            if (drain is not null)
+            {
+                try { await drain; } catch { /* wrapper already mapped it */ }
+            }
+        }
+        finally
+        {
+            pump?.Dispose();
+            await DisposeLiveSessionQuietly(session);
+        }
     }
 
     /// <summary>
@@ -767,6 +1055,7 @@ public partial class App : System.Windows.Application
         var pump = _livePump;
         var session = _liveSession;
         var setup = _liveSetup;
+        var drain = _liveDrain;
         var keyIndex = _liveKeyIndex;
         DetachLivePump();
         ClearLiveFields();
@@ -774,36 +1063,44 @@ public partial class App : System.Windows.Application
 
         // A failure latched before/during stop (pump-full, drain error) wins
         // over finalizing: a failed session never pastes, even truncated.
-        if (await AbortIfLiveFailedAsync(generation, token, pump, session))
+        if (await AbortIfLiveFailedAsync(generation, token, pump, session, drain))
             return;
 
         byte[] wav;
         try
         {
             wav = await _recorder.StopAsync(token);
-            token.ThrowIfCancellationRequested();
+            RestoreRecordingMute();
         }
         catch (OperationCanceledException)
         {
+            RestoreRecordingMute();
             if (pump is not null) TeardownLivePump(pump, null);
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
         catch (Exception ex)
         {
+            RestoreRecordingMute();
             if (pump is not null) TeardownLivePump(pump, null);
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.ReportUploadFailed(
                 generation, new RecordingError(RecordingErrorReason.Unknown), ex);
             return;
         }
 
-        // The recording is captured; its bytes never leave memory.
+        // The recording is captured; its bytes never leave memory. Clear it
+        // before any cancellation/staleness gate can return.
         Array.Clear(wav, 0, wav.Length);
 
         if (session is null || pump is null || setup is null)
         {
+            TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.ReportUploadFailed(
                 generation, new RecordingError(RecordingErrorReason.Unknown));
             return;
@@ -814,6 +1111,7 @@ public partial class App : System.Windows.Application
         {
             TeardownLivePump(pump, null);
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
@@ -829,7 +1127,25 @@ public partial class App : System.Windows.Application
         {
             TeardownLivePump(pump, null);
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+        catch (Exception ex)
+        {
+            TeardownLivePump(pump, null);
+            await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
+            if (ShouldCommitLiveTranscript(generation, token, _coordinator))
+            {
+                _coordinator.ReportUploadFailed(
+                    generation, new TranscriptionError("Transcription failed — try again"), ex);
+            }
+            else
+            {
+                _coordinator.NotifyUploadCancelled(generation);
+            }
+
             return;
         }
 
@@ -837,6 +1153,7 @@ public partial class App : System.Windows.Application
         {
             TeardownLivePump(pump, null);
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             if (ShouldCommitLiveTranscript(generation, token, _coordinator))
                 _coordinator.ReportUploadFailed(generation, new TranscriptionError("Timed out — try again"));
             else
@@ -847,20 +1164,29 @@ public partial class App : System.Windows.Application
         // Exactly-once drain (the record path normally already started it),
         // then Complete-then-finalize so the last buffered chunk (§15) is
         // delivered before the end markers.
-        StartLiveDrain(pump, session, generation, token);
+        if (drain is null)
+        {
+            StartLiveDrain(pump, session, generation, token);
+            drain = _liveDrain;
+        }
+
         pump.Complete();
-        if (_liveDrain is not null)
-            await _liveDrain;
+        if (drain is not null)
+            await drain;
+        // The drain owns each chunk's lifetime. Dispose the pump now so a
+        // cancelled/failed tail cannot retain queued audio.
+        TeardownLivePump(pump, null);
 
         // A failure latched during the drain (drain error racing stop) also
         // aborts before finalize — same fail-closed rule as above.
-        if (await AbortIfLiveFailedAsync(generation, token, pump, session))
+        if (await AbortIfLiveFailedAsync(generation, token, pump, session, drain))
             return;
 
         // A cancel that landed during the drain must not finalize.
         if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
         {
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
@@ -873,33 +1199,46 @@ public partial class App : System.Windows.Application
         catch (OperationCanceledException)
         {
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
         catch (Exception) when (token.IsCancellationRequested || generation != _coordinator.Generation)
         {
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.NotifyUploadCancelled(generation);
             return;
         }
         catch (Exception ex)
         {
             await DisposeLiveSessionQuietly(session);
+            RetireLiveGeneration(generation);
             _coordinator.ReportUploadFailed(
                 generation, new TranscriptionError("Transcription failed — try again"), ex);
             return;
         }
 
         await DisposeLiveSessionQuietly(session);
+        // A drain failure can be latched while the final response is in
+        // flight. Consume it before any commit, not only before finalize.
+        if (await AbortIfLiveFailedAsync(generation, token, null, null, null))
+            return;
+
+        if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
+        {
+            RetireLiveGeneration(generation);
+            _coordinator.NotifyUploadCancelled(generation);
+            return;
+        }
+
+        // Capture is stopped, the handler is detached, and the session has
+        // closed. Retire this generation before touching History/clipboard so
+        // a callback already in NAudio teardown cannot surface a stale error.
+        RetireLiveGeneration(generation);
         switch (outcome)
         {
             case LiveAttemptOutcome.Done done:
-                if (!ShouldCommitLiveTranscript(generation, token, _coordinator))
-                {
-                    _coordinator.NotifyUploadCancelled(generation);
-                    return;
-                }
-
                 if (string.IsNullOrWhiteSpace(done.Text))
                 {
                     PersistFailedLiveRow("Got empty transcript — try again");
@@ -941,13 +1280,40 @@ public partial class App : System.Windows.Application
     /// <see cref="FailLiveSession"/> via the shared latch.
     /// </summary>
     private async Task<bool> AbortIfLiveFailedAsync(
-        long generation, CancellationToken token, LivePcmPump? pump, LiveSession? session)
+        long generation,
+        CancellationToken token,
+        LivePcmPump? pump,
+        LiveSession? session,
+        Task? drain)
     {
-        if (!_liveFailed)
+        if (!_liveFailed || _liveFailedGeneration != generation)
             return false;
+
         _liveFailed = false;
-        if (pump is not null)
-            TeardownLivePump(pump, null);
+        _liveFailedGeneration = 0;
+        _liveGeneration = 0;
+        _recorder.Cancel();
+        RestoreRecordingMute();
+
+        // Complete the producer first, then await the already-started drain
+        // before disposing either resource. Otherwise a pump-full/drain error
+        // can leave a background consumer using a disposed pump or socket.
+        pump?.Complete();
+        if (drain is not null)
+        {
+            try
+            {
+                await drain;
+            }
+            catch
+            {
+                // RunLiveDrainAsync normally converts failures to the latch;
+                // keep cleanup fail-safe if a future implementation changes
+                // that wrapper.
+            }
+        }
+
+        pump?.Dispose();
         await DisposeLiveSessionQuietly(session);
         if (ShouldCommitLiveTranscript(generation, token, _coordinator))
             _coordinator.ReportUploadFailed(generation, new TranscriptionError("Transcription failed — try again"));
@@ -963,11 +1329,12 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void PersistFailedLiveRow(string message)
     {
+        var safeMessage = TranscriptionError.Sanitize(message);
         var failed = _clips.Add(string.Empty);
         if (_mainWindow?.SectionView(MainSection.History)
             is Views.HistorySettingsView history)
         {
-            history.AttachError(failed.Id, message);
+            history.AttachError(failed.Id, safeMessage);
         }
     }
 
@@ -992,6 +1359,57 @@ public partial class App : System.Windows.Application
         pump?.Dispose();
     }
 
+    /// <summary>
+    /// Stops a Live session when the user switches models while recording.
+    /// The current stop path deliberately falls back to the recorder's WAV
+    /// capture in that case, so the old pump, setup task, drain, and socket
+    /// must all be completed before the fallback can proceed.
+    /// </summary>
+    private async Task AbandonLiveSessionAsync()
+    {
+        var pump = _livePump;
+        var session = _liveSession;
+        var setup = _liveSetup;
+        var drain = _liveDrain;
+
+        DetachLivePump();
+        ClearLiveFields();
+        // Detached callbacks from this session must not affect the fallback
+        // recording or a later Live generation.
+        _liveGeneration = 0;
+        _liveFailed = false;
+        _liveFailedGeneration = 0;
+
+        pump?.Complete();
+        await DisposeLiveSessionQuietly(session);
+
+        if (setup is not null)
+        {
+            try
+            {
+                await setup;
+            }
+            catch
+            {
+                // Cancellation/transport failure is expected during abandon.
+            }
+        }
+
+        if (drain is not null)
+        {
+            try
+            {
+                await drain;
+            }
+            catch
+            {
+                // RunLiveDrainAsync normally observes and maps its own errors.
+            }
+        }
+
+        pump?.Dispose();
+    }
+
     /// <summary>Clears the published Live snapshot. Callers snapshot locals first.</summary>
     private void ClearLiveFields()
     {
@@ -999,6 +1417,21 @@ public partial class App : System.Windows.Application
         _liveSession = null;
         _liveSetup = null;
         _liveDrain = null;
+        _livePcmHandler = null;
+    }
+
+    /// <summary>
+    /// Retires a completed Live generation so a late recorder callback cannot
+    /// turn a successful/settled stop into a second error notification.
+    /// Conditional retirement preserves a newer generation if one has already
+    /// started.
+    /// </summary>
+    private void RetireLiveGeneration(long generation)
+    {
+        if (_liveGeneration == generation)
+        {
+            _liveGeneration = 0;
+        }
     }
 
     /// <summary>Best-effort session release: tears down the session CTS and socket, never throws.</summary>
@@ -1030,26 +1463,51 @@ public partial class App : System.Windows.Application
     private void HandleError(IDictationError error, Exception? cause = null)
     {
         ArgumentNullException.ThrowIfNull(error);
-        DisarmCancelHotkey();
-        RefreshMenu();
-        if (OverlayModes.ShouldShowPill(_settings.ShowOverlay))
+        if (!Dispatcher.CheckAccess())
         {
-            EnsureOverlay();
-            _overlay?.ShowError(error.UserMessage);
-        }
-        _notifier.Notify(
-            "Voice IME",
-            error.UserMessage,
-            NotificationSeverity.Error,
-            secrets: _settings.ApiKeys);
-        SetTray(TrayStateText.TooltipFor(DictationState.Error, _settings.Hotkey, error.UserMessage));
-        if (cause is not null)
-        {
-            // Type names only — raw exception text may embed key material.
-            Logger.Error($"dictation failed error={error.GetType().Name} cause={cause.GetType().Name}");
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() => HandleError(error, cause)));
+            }
+            catch
+            {
+                // The dispatcher may already be shutting down.
+            }
+
+            return;
         }
 
-        _coordinator.AcknowledgeError();
+        try
+        {
+            DisarmCancelHotkey();
+            RefreshMenu();
+            if (OverlayModes.ShouldShowPill(_settings.ShowOverlay))
+            {
+                EnsureOverlay();
+                _overlay?.ShowError(error.UserMessage);
+            }
+            _notifier.Notify(
+                "Voice IME",
+                error.UserMessage,
+                NotificationSeverity.Error,
+                secrets: _settings.ApiKeys);
+            SetTray(TrayStateText.TooltipFor(DictationState.Error, _settings.Hotkey, error.UserMessage));
+            if (cause is not null)
+            {
+                // Type names only — raw exception text may embed key material.
+                Logger.Error($"dictation failed error={error.GetType().Name} cause={cause.GetType().Name}");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Presentation is best effort; a disposed tray/window must not
+            // strand the coordinator in Error forever.
+            Logger.Error($"error presentation failed: {ex.GetType().Name}");
+        }
+        finally
+        {
+            _coordinator.AcknowledgeError();
+        }
     }
 
     /// <summary>
@@ -1181,7 +1639,22 @@ public partial class App : System.Windows.Application
             == TrayGuardAction.ShowWindow)
         {
             _mainWindow ??= CreateMainWindow();
+            AttachLiveHotkey(_mainWindow);
             ShowMainWindow();
+        }
+    }
+
+    private void RestoreRecordingMute()
+    {
+        var mute = _recordingMute;
+        _recordingMute = null;
+        try
+        {
+            mute?.Dispose();
+        }
+        catch
+        {
+            // The endpoint may disappear during shutdown/unplug.
         }
     }
 
@@ -1193,14 +1666,49 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void CancelRecording()
     {
+        _hotkeyPhysicalDown = false;
         DisarmCancelHotkey();
         DetachLivePump();
+        var livePump = _livePump;
         var liveSession = _liveSession;
+        var liveDrain = _liveDrain;
+        DetachLivePump();
         ClearLiveFields();
+        _liveGeneration = 0;
+        _liveFailed = false;
+        _liveFailedGeneration = 0;
         ClearLivePreview();
-        _ = DisposeLiveSessionQuietly(liveSession);
+        // Cancel the coordinator token before asking the drain to finish. The
+        // drain then releases any in-flight socket send without disposing the
+        // pump underneath its reader.
         _coordinator.CancelCurrentOperation();
         _recorder.Cancel();
+        RestoreRecordingMute();
+        _ = FinishCancelledLiveCleanupAsync(livePump, liveSession, liveDrain);
+    }
+
+    private static async Task FinishCancelledLiveCleanupAsync(
+        LivePcmPump? pump, LiveSession? session, Task? drain)
+    {
+        // Abort socket I/O after the coordinator token is cancelled, but keep
+        // the pump alive until its reader has observed cancellation.
+        await DisposeLiveSessionQuietly(session);
+        pump?.Complete();
+        if (drain is not null)
+        {
+            try
+            {
+                await drain;
+            }
+            catch
+            {
+                // Cancellation cleanup is best effort; the wrapper normally
+                // converts transport failures into a silent cancellation.
+            }
+        }
+
+        pump?.Dispose();
+        await DisposeLiveSessionQuietly(session);
     }
 
     /// <summary>
@@ -1315,6 +1823,13 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void ApplyAdvancedSave(SettingsStore _)
     {
+        _clips.SetLimit(_settings.HistoryLimit);
+        if (_mainWindow?.SectionView(MainSection.History)
+            is Views.HistorySettingsView history)
+        {
+            history.BindStore(_clips);
+        }
+
         ApplyAutostartSetting();
         EnforceTrayGuard();
     }
@@ -1458,6 +1973,8 @@ public partial class App : System.Windows.Application
         {
             about.ReloadFromSettings();
         }
+
+        window.RefreshFirstRunHintBanner();
     }
 
     internal void ShowMainWindow()
@@ -1508,7 +2025,11 @@ public partial class App : System.Windows.Application
     /// <see cref="Views.GeneralSettingsView.Saved"/> adapter: the event
     /// carries the saved store, the tooltip re-reads the live one.
     /// </summary>
-    private void RefreshTrayTextFromSave(SettingsStore _) => RefreshTrayText();
+    private void RefreshTrayTextFromSave(SettingsStore _)
+    {
+        RefreshTrayText();
+        _mainWindow?.RefreshFirstRunHintBanner();
+    }
 
     private void SetTray(string text)
     {
@@ -1537,12 +2058,16 @@ public partial class App : System.Windows.Application
         DetachLivePump();
         var livePump = _livePump;
         var liveSession = _liveSession;
+        var liveDrain = _liveDrain;
         ClearLiveFields();
-        livePump?.Complete();
-        livePump?.Dispose();
-        _ = DisposeLiveSessionQuietly(liveSession);
+        _liveGeneration = 0;
+        _liveFailed = false;
+        _liveFailedGeneration = 0;
+        _coordinator.CancelCurrentOperation();
+        _ = FinishCancelledLiveCleanupAsync(livePump, liveSession, liveDrain);
         _coordinator.Dispose();
-        _recorder.Cancel();
+        _recorder.Dispose();
+        RestoreRecordingMute();
         _overlay?.Close();
         _hotkeyWindow?.Dispose();
         _cancelHotkeyWindow?.Dispose();

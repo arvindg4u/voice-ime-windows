@@ -52,7 +52,11 @@ public sealed class SettingsStore
     // Task 8: ShowOverlay graduated bool→string ("none"/"minimal"/"full",
     // default full); legacy true/false coerce silently, no version bump.
     // Task 8: AutoSubmit (Enter after paste) is additive, shipped false.
-    public bool StartHidden { get; set; }
+    /// <summary>
+    /// Keeps the normal tray-first launch hidden. When false, the settings
+    /// shell opens on the next launch.
+    /// </summary>
+    public bool StartHidden { get; set; } = true;
     public bool Autostart { get; set; }
     public bool ShowTrayIcon { get; set; } = true;
     public string ShowOverlay { get; set; } = OverlayModes.Full;
@@ -196,6 +200,11 @@ public sealed class SettingsStore
     /// </summary>
     public void Migrate()
     {
+        ApiKeys = NormalizeApiKeys(ApiKeys);
+        BaseUrl ??= "https://generativelanguage.googleapis.com/v1beta";
+        Model ??= "gemini-2.5-flash";
+        CustomPrompt ??= "";
+        ActivePrompt ??= "";
         Hotkey = CoerceHotkey(Hotkey, Warn);
         ActivationMode = CoerceActivationMode(ActivationMode, Warn);
         Microphone ??= "";
@@ -223,6 +232,11 @@ public sealed class SettingsStore
 
     public void Save()
     {
+        ApiKeys = NormalizeApiKeys(ApiKeys);
+        BaseUrl ??= "https://generativelanguage.googleapis.com/v1beta";
+        Model ??= "gemini-2.5-flash";
+        CustomPrompt ??= "";
+        ActivePrompt ??= "";
         Hotkey = CoerceHotkey(Hotkey);
         ActivationMode = CoerceActivationMode(ActivationMode);
         Microphone ??= "";
@@ -241,44 +255,136 @@ public sealed class SettingsStore
         ActivePrompt = PromptLibrary.CoerceActivePrompt(ActivePrompt, Prompts);
         CustomPrompt = ActivePromptText;
         SchemaVersion = CurrentSchemaVersion;
-        var dir = Path.GetDirectoryName(SettingsPath)!;
-        Directory.CreateDirectory(dir);
-        var joined = string.Join('\n', ApiKeys);
-        var plain = Encoding.UTF8.GetBytes(joined);
-        var cipher = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
-        CryptographicOperations.ZeroMemory(plain);
-        var root = new
+        var path = SettingsPath;
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir))
         {
-            schemaVersion = SchemaVersion,
-            baseUrl = BaseUrl,
-            model = Model,
-            customPrompt = CustomPrompt,
-            keyCursor = KeyCursor,
-            hotkey = Hotkey,
-            activationMode = ActivationMode,
-            microphone = Microphone,
-            muteWhileRecording = MuteWhileRecording,
-            startHidden = StartHidden,
-            autostart = Autostart,
-            showTrayIcon = ShowTrayIcon,
-            showOverlay = ShowOverlay,
-            autoSubmit = AutoSubmit,
-            pasteMethod = PasteMethod,
-            historyLimit = HistoryLimit,
-            theme = Theme,
-            language = Language,
-            channel = Channel,
-            outputDevice = OutputDevice,
-            volume = Volume,
-            audioFeedback = AudioFeedback,
-            cancelHotkey = CancelHotkey,
-            prompts = Prompts.Select(static p => new { name = p.Name, text = p.Text }).ToList(),
-            activePrompt = ActivePrompt,
-            seenHint = SeenHint,
-            smartMode = SmartMode,
-            apiKeysProtected = Convert.ToBase64String(cipher),
-        };
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(root, JsonOptions));
+            Directory.CreateDirectory(dir);
+        }
+
+        byte[]? plain = null;
+        byte[]? cipher = null;
+        try
+        {
+            var joined = string.Join('\n', ApiKeys);
+            plain = Encoding.UTF8.GetBytes(joined);
+            cipher = ProtectedData.Protect(plain, null, DataProtectionScope.CurrentUser);
+            var root = new
+            {
+                schemaVersion = SchemaVersion,
+                baseUrl = BaseUrl,
+                model = Model,
+                customPrompt = CustomPrompt,
+                keyCursor = KeyCursor,
+                hotkey = Hotkey,
+                activationMode = ActivationMode,
+                microphone = Microphone,
+                muteWhileRecording = MuteWhileRecording,
+                startHidden = StartHidden,
+                autostart = Autostart,
+                showTrayIcon = ShowTrayIcon,
+                showOverlay = ShowOverlay,
+                autoSubmit = AutoSubmit,
+                pasteMethod = PasteMethod,
+                historyLimit = HistoryLimit,
+                theme = Theme,
+                language = Language,
+                channel = Channel,
+                outputDevice = OutputDevice,
+                volume = Volume,
+                audioFeedback = AudioFeedback,
+                cancelHotkey = CancelHotkey,
+                prompts = Prompts.Select(static p => new { name = p.Name, text = p.Text }).ToList(),
+                activePrompt = ActivePrompt,
+                seenHint = SeenHint,
+                smartMode = SmartMode,
+                apiKeysProtected = Convert.ToBase64String(cipher),
+            };
+            AtomicWrite(path, JsonSerializer.Serialize(root, JsonOptions));
+        }
+        finally
+        {
+            if (plain is not null)
+            {
+                CryptographicOperations.ZeroMemory(plain);
+            }
+
+            if (cipher is not null)
+            {
+                CryptographicOperations.ZeroMemory(cipher);
+            }
+        }
+    }
+
+    internal static List<string> NormalizeApiKeys(IEnumerable<string>? keys)
+    {
+        var normalized = new List<string>();
+        if (keys is null)
+        {
+            return normalized;
+        }
+
+        foreach (var key in keys)
+        {
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                normalized.Add(key.Trim());
+            }
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Writes a complete replacement beside the destination and swaps it into
+    /// place. A torn JSON file must never make the next launch lose settings.
+    /// </summary>
+    private static void AtomicWrite(string path, string contents)
+    {
+        var directory = Path.GetDirectoryName(path);
+        var tempDirectory = string.IsNullOrEmpty(directory)
+            ? Environment.CurrentDirectory
+            : directory;
+        var fileName = Path.GetFileName(path);
+        var tempPath = Path.Combine(
+            tempDirectory, $".{fileName}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            File.WriteAllText(tempPath, contents, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            if (File.Exists(path))
+            {
+                try
+                {
+                    File.Replace(tempPath, path, destinationBackupFileName: null);
+                }
+                catch (Exception ex) when (ex is PlatformNotSupportedException or IOException)
+                {
+                    // File.Replace is atomic on the normal NTFS path. Some
+                    // redirected/test filesystems do not implement it; the
+                    // overwrite fallback still avoids leaving a zero-byte file.
+                    File.Move(tempPath, path, overwrite: true);
+                }
+            }
+            else
+            {
+                File.Move(tempPath, path);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch
+            {
+                // Preserve the original write/replace exception.
+            }
+        }
     }
 
     /// <summary>
@@ -406,8 +512,8 @@ public sealed class SettingsStore
 
     /// <summary>
     /// Bad channel strings fall back to mono (warns via the same
-    /// coerce-don't-throw contract). The recorder behaves as today — this
-    /// screen only persists the choice.
+    /// coerce-don't-throw contract). AudioRecorder applies the selected
+    /// capture mode when the session starts.
     /// </summary>
     internal static string CoerceChannel(string? value) => CoerceChannel(value, null);
 
@@ -529,19 +635,32 @@ public sealed class SettingsStore
         // already read above.
         if (root.TryGetProperty("apiKeysProtected", out var keys))
         {
+            byte[]? cipher = null;
+            byte[]? plain = null;
             try
             {
-                var cipher = Convert.FromBase64String(keys.GetString() ?? "");
-                var plain = ProtectedData.Unprotect(cipher, null, DataProtectionScope.CurrentUser);
+                cipher = Convert.FromBase64String(keys.GetString() ?? "");
+                plain = ProtectedData.Unprotect(cipher, null, DataProtectionScope.CurrentUser);
                 ApiKeys = Encoding.UTF8.GetString(plain)
                     .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .ToList();
-                CryptographicOperations.ZeroMemory(plain);
             }
             catch (Exception ex)
             {
                 Warn($"Could not decrypt API keys ({ex.GetType().Name}) — starting with an empty key list.");
                 ApiKeys = [];
+            }
+            finally
+            {
+                if (plain is not null)
+                {
+                    CryptographicOperations.ZeroMemory(plain);
+                }
+
+                if (cipher is not null)
+                {
+                    CryptographicOperations.ZeroMemory(cipher);
+                }
             }
         }
     }

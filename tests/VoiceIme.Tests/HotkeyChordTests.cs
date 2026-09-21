@@ -54,6 +54,20 @@ public sealed class HotkeyChordTests
         Assert.Equal(expected, HotkeyChord.Format(modifiers, vk));
     }
 
+    [Theory]
+    [InlineData("Ctrl+OemPlus", 0xBB)]
+    [InlineData("Shift+Semicolon", 0xBA)]
+    [InlineData("Alt+Numpad7", 0x67)]
+    [InlineData("Ctrl+IntlBackslash", 0xE2)]
+    public void TryParse_CommonPunctuationAndNumpadKeys(string chord, uint expectedVk)
+    {
+        Assert.True(HotkeyChord.TryParse(chord, out var modifiers, out var vk));
+        Assert.NotEqual(0u, modifiers);
+        Assert.Equal(expectedVk, vk);
+        Assert.True(HotkeyChord.TryParse(HotkeyChord.Format(modifiers, vk), out _, out var roundTrip));
+        Assert.Equal(expectedVk, roundTrip);
+    }
+
     [Fact]
     public void Parse_Format_RoundTripsDefaultChord()
     {

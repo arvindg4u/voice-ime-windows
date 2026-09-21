@@ -229,9 +229,9 @@ public partial class GeminiSettingsView
         {
             _saver(_settings);
         }
-        catch (Exception ex)
+        catch
         {
-            StatusText.Text = $"Save failed: {ex.Message}";
+            StatusText.Text = "Save failed: please try again.";
             return false;
         }
 

@@ -44,9 +44,20 @@ public sealed class LlmClient : IDisposable
         bool smartMode = false,
         CancellationToken ct = default)
     {
-        var request = new TranscriptionRequest(wav, model, apiKeys, startIndex, customPrompt, smartMode);
-        var result = await TranscribeRoutedAsync(request, baseUrl, ct);
-        return (result.Transcript, result.UsedKeyIndex);
+        ArgumentNullException.ThrowIfNull(wav);
+        try
+        {
+            ArgumentNullException.ThrowIfNull(apiKeys);
+            var request = new TranscriptionRequest(wav, model, apiKeys, startIndex, customPrompt, smartMode);
+            var result = await TranscribeRoutedAsync(request, baseUrl, ct);
+            return (result.Transcript, result.UsedKeyIndex);
+        }
+        finally
+        {
+            // Every route, including cancellation, malformed responses, and
+            // all-key rotation, releases the caller's microphone buffer.
+            Array.Clear(wav, 0, wav.Length);
+        }
     }
 
     /// <summary>
@@ -63,7 +74,7 @@ public sealed class LlmClient : IDisposable
             case TransportKind.Live:
                 try
                 {
-                    return await NewLiveTransport(baseUrl).TranscribeAsync(request, ct);
+                    return await NewLiveTransport(baseUrl).TranscribeAsync(CloneForTransport(request), ct);
                 }
                 catch (TransportFallbackException ex)
                 {
@@ -72,25 +83,28 @@ public sealed class LlmClient : IDisposable
                 }
             case TransportKind.Interactions:
                 return await new InteractionsTranscriptionTransport(_http, baseUrl)
-                    .TranscribeAsync(request, ct);
+                    .TranscribeAsync(CloneForTransport(request), ct);
             default:
                 try
                 {
                     return await new RestTranscriptionTransport(_http, baseUrl)
-                        .TranscribeAsync(request, ct);
+                        .TranscribeAsync(CloneForTransport(request), ct);
                 }
                 catch (TransportFallbackException fb) when (fb.Target == TransportKind.Live)
                 {
                     return await NewLiveTransport(baseUrl).TranscribeAsync(
-                        request with { StartKeyIndex = fb.KeyIndex }, ct);
+                        CloneForTransport(request) with { StartKeyIndex = fb.KeyIndex }, ct);
                 }
                 catch (TransportFallbackException fb) when (fb.Target == TransportKind.Interactions)
                 {
                     return await new InteractionsTranscriptionTransport(_http, baseUrl)
-                        .TranscribeAsync(request with { StartKeyIndex = fb.KeyIndex }, ct);
+                        .TranscribeAsync(CloneForTransport(request) with { StartKeyIndex = fb.KeyIndex }, ct);
                 }
         }
     }
+
+    private static TranscriptionRequest CloneForTransport(TranscriptionRequest request) =>
+        request with { AudioWav = (byte[])request.AudioWav.Clone() };
 
     private LiveTranscriptionTransport NewLiveTransport(string baseUrl) =>
         new(baseUrl, _liveGuard, LiveSocketsForTests ?? new ClientWebSocketLiveSocketFactory());

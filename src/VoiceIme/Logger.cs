@@ -108,8 +108,16 @@ public static class Logger
         }
 
         using var sha = SHA256.Create();
-        var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(key));
-        return Convert.ToHexString(hash)[..4].ToLowerInvariant();
+        var keyBytes = Encoding.UTF8.GetBytes(key);
+        try
+        {
+            var hash = sha.ComputeHash(keyBytes);
+            return Convert.ToHexString(hash)[..4].ToLowerInvariant();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keyBytes);
+        }
     }
 
     internal static LogLevel ParseLevel(string? value)
@@ -137,7 +145,11 @@ public static class Logger
             try
             {
                 var path = LogPath;
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
                 RotateIfNeeded(path);
                 File.AppendAllText(path, line + Environment.NewLine, Encoding.UTF8);
             }

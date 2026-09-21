@@ -15,9 +15,9 @@ namespace VoiceIme.Views;
 /// clear-unpinned footer. Failed transcriptions appear as retryable rows
 /// (empty text + error) — audio is never persisted, so Retry surfaces a
 /// re-dictate hint instead of re-sending. Viewmodel-less code-behind over
-/// <see cref="ClipboardStore"/>; the store keeps its cap-100 / pin-survives /
-/// newest-first semantics untouched (this view only calls Add/TogglePin/
-/// Delete/ClearUnpinned). Hosted by <see cref="MainWindow"/> via
+/// <see cref="ClipboardStore"/>; the store keeps its configured cap,
+/// pin-survives, and newest-first semantics (this view only calls
+/// Add/TogglePin/Delete/ClearUnpinned). Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.History, view).
 /// </summary>
 public partial class HistorySettingsView : System.Windows.Controls.UserControl
@@ -129,9 +129,9 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
             _copiedId = id;
             HintText.Text = CopiedHint;
         }
-        catch (Exception ex)
+        catch
         {
-            HintText.Text = $"Copy failed: {ex.Message}";
+            HintText.Text = "Copy failed: clipboard unavailable.";
         }
 
         Refresh();
@@ -212,9 +212,9 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         {
             _openDataFolder();
         }
-        catch (Exception ex)
+        catch
         {
-            HintText.Text = $"Couldn't open the data folder: {ex.Message}";
+            HintText.Text = "Couldn't open the data folder — try again.";
         }
     }
 
