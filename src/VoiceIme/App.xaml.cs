@@ -31,7 +31,7 @@ public partial class App : System.Windows.Application
     private readonly AudioRecorder _recorder = new();
     private readonly LlmClient _llm = new();
     private SettingsStore _settings = SettingsStore.Load();
-    private readonly ClipboardStore _clips = new(maxEntries: _settings.HistoryLimit);
+    private readonly ClipboardStore _clips = new();
     private readonly DictationCoordinator _coordinator = new();
     private IDisposable? _recordingMute;
     private OverlayWindow? _overlay;
