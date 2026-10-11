@@ -337,7 +337,15 @@ reason are logged there verbatim for diagnosis.
 
 Click the text field first, then dictate. If the target runs as Administrator
 (e.g. elevated Task Manager), relaunch Voice IME as admin — or copy from
-History.
+History. Windows blocks keystroke injection into elevated windows (UIPI);
+when that happens the log shows `paste: SendInput … win32=5`.
+
+Voice IME waits briefly for you to lift the hotkey keys before sending the
+paste chord (held modifiers would turn Ctrl+V into e.g. Ctrl+Alt+V), retries
+around Windows 11's clipboard-history service when the clipboard is busy,
+and restores your previous clipboard text about a second after the paste.
+Every delivery failure keeps the transcript in History and writes a
+`paste:` diagnostic line to `%AppData%\VoiceIme\logs\voiceime.log`.
 </details>
 
 <details>

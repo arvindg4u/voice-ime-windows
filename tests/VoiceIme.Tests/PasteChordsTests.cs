@@ -52,4 +52,20 @@ public sealed class PasteChordsTests
         Assert.Equal(new ushort[] { PasteChords.VkControl }, chord.Modifiers);
         Assert.Equal(PasteChords.VkV, chord.Key);
     }
+
+    [Theory]
+    [InlineData(PasteChords.VkInsert, true)]   // Insert is an extended key
+    [InlineData(0xA3, true)]                   // right Ctrl
+    [InlineData(0xA5, true)]                   // right Alt
+    [InlineData(0x5B, true)]                   // left Win
+    [InlineData(PasteChords.VkV, false)]
+    [InlineData(PasteChords.VkControl, false)] // generic/left Ctrl
+    [InlineData(PasteChords.VkShift, false)]
+    [InlineData(PasteChords.VkReturn, false)]  // main Enter (numpad Enter would be extended)
+    public void IsExtendedKey_MatchesWin32ScanCodeRules(ushort vk, bool extended)
+    {
+        // Shift+Insert delivery depends on this: without KEYEVENTF_EXTENDEDKEY
+        // the Insert scan code aliases the numpad 0 key.
+        Assert.Equal(extended, NativeInput.IsExtendedKey(vk));
+    }
 }

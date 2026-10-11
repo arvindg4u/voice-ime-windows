@@ -905,9 +905,18 @@ public partial class App : System.Windows.Application
         }
 
         if (isFinal)
+        {
             _liveFinals += text;
+            // The finalized segment supersedes its own interim hypothesis;
+            // keeping the stale interim duplicates the tail ("hello world
+            // hello world") and then visibly collapses when the next interim
+            // arrives — the "preview keeps disappearing" artifact.
+            _liveInterim = string.Empty;
+        }
         else
+        {
             _liveInterim = text;
+        }
         _overlay?.SetPreview(OverlayState.FormatPreview(_liveFinals, _liveInterim));
     }
 

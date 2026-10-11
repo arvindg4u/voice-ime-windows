@@ -255,7 +255,10 @@ public sealed class AppLiveStreamingTests
         var finals = "";
         var interim = "";
         session.InterimReceived += text => interim = text;
-        session.FinalReceived += delta => finals += delta;
+        // App contract: a final supersedes its own interim hypothesis —
+        // PublishLivePreview clears the interim on the final delta so the
+        // preview never shows the duplicated tail.
+        session.FinalReceived += delta => { finals += delta; interim = ""; };
 
         // Act: the exact App drain-task shape — connect, drain, finalize.
         Assert.True(await session.ConnectAndSetupAsync(LiveUri(), CancellationToken.None));
@@ -270,8 +273,8 @@ public sealed class AppLiveStreamingTests
         var done = Assert.IsType<LiveAttemptOutcome.Done>(outcome);
         Assert.Equal("hello world", done.Text);
         Assert.Equal("hello world", finals);
-        Assert.Equal("hello", interim);
-        Assert.Equal("hello world hello", OverlayState.FormatPreview(finals, interim));
+        Assert.Equal("", interim);
+        Assert.Equal("hello world", OverlayState.FormatPreview(finals, interim));
     }
 
     [Fact]
