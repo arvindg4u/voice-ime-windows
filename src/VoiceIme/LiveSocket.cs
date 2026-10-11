@@ -50,6 +50,7 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
     private const int ReceiveBufferSize = 8192;
     private readonly ClientWebSocket _socket = new();
     private bool _disposed;
+    private bool _firstMessageLogged;
 
     /// <inheritdoc />
     public int? CloseCode { get; private set; }
@@ -122,15 +123,21 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
                 await ReplyCloseAsync(ct);
                 return null;
             }
-            if (result.MessageType == WebSocketMessageType.Binary)
-            {
-                while (!result.EndOfMessage)
-                    result = await ReceiveSegmentAsync(buffer, ct);
-                continue;
-            }
+            // Gemini Live sends every server message — setupComplete included —
+            // as a BINARY frame carrying UTF-8 JSON (the official Python SDK
+            // reads raw bytes and JSON-decodes; Android handles it in OkHttp's
+            // onMessage(ByteString)). Binary and Text frames are therefore
+            // decoded identically; discarding binary frames leaves the client
+            // deaf and every session times out at the setup-ACK gate.
             message.Write(buffer, 0, result.Count);
-            if (result.EndOfMessage)
-                return Encoding.UTF8.GetString(message.ToArray());
+            if (!result.EndOfMessage)
+                continue;
+            if (!_firstMessageLogged)
+            {
+                _firstMessageLogged = true;
+                Logger.Debug($"live-wire: first server frame type={result.MessageType} bytes={message.Length}");
+            }
+            return Encoding.UTF8.GetString(message.ToArray());
         }
     }
 
