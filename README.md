@@ -310,6 +310,29 @@ fails fast instead — check that key.
 </details>
 
 <details>
+<summary><strong>Live model errors ("Model not available for Live", "Live setup rejected", "Network error")</strong></summary>
+
+Live (`-live` / `native-audio` / `-dialog`) models stream over a WebSocket.
+The Gemini endpoint reports most setup problems by closing that socket with a
+reason, which Voice IME maps to a typed message:
+
+- **Model not available for Live — check Settings** — the model name isn't
+  served by `v1beta` `bidiGenerateContent` (typo, retired preview name, or
+  regional availability). Switch to a current Live model in Settings.
+- **Live setup rejected by server — check model in Settings** — the server
+  rejected the session config for this model.
+- **Invalid API key / Rate limited** — same meaning as the REST path; rate
+  limits rotate to your next key automatically before any audio is sent.
+- **Network error — check connection** — a genuine transport drop (no HTTP
+  status, no close reason): firewall/proxy blocking `wss://`, captive portal,
+  or offline.
+
+Every Live connection writes a key-free `live-wire` trail to
+`%AppData%\VoiceIme\logs\voiceime.log` — the exact server close code and
+reason are logged there verbatim for diagnosis.
+</details>
+
+<details>
 <summary><strong>Paste doesn't land in the app</strong></summary>
 
 Click the text field first, then dictate. If the target runs as Administrator

@@ -81,6 +81,91 @@ public sealed class LiveSetupFailureTests
         Assert.False(rotate);
     }
 
+    // --- Setup-close reason mapping (server reports errors via close frame) ---
+
+    [Theory]
+    [InlineData(1008,
+        "models/gemini-live-2.5-flash-preview is not found for API version v1beta, or is not supported for bidiGenerateContent. Call ListModels",
+        "Model not available for Live — check Settings", false)]
+    [InlineData(1008, "API key not valid. Please pass a valid API key.",
+        "Invalid API key — check Settings", false)]
+    [InlineData(1008, "Operation is not implemented, or supported, or enabled.",
+        "Server error (close 1008) — try again", false)]
+    [InlineData(1011, "Quota exceeded for quota metric",
+        "Rate limited on all keys — retry later", true)]
+    [InlineData(1011, "RESOURCE_EXHAUSTED",
+        "Rate limited on all keys — retry later", true)]
+    [InlineData(1007, "Request contains an invalid argument.",
+        "Live setup rejected by server — check model in Settings", false)]
+    [InlineData(1011, "Internal error encountered.",
+        "Server error (close 1011) — try again", false)]
+    public void MapSetupCloseReason_KnownServerCloses_MapToTypedMessages(
+        int code, string reason, string expectedMessage, bool expectedRotate)
+    {
+        var (message, rotate) = LiveProtocol.MapSetupCloseReason(code, reason);
+        Assert.Equal(expectedMessage, message);
+        Assert.Equal(expectedRotate, rotate);
+    }
+
+    [Fact]
+    public void MapSetupCloseReason_NoCloseInfo_StaysNetworkError()
+    {
+        var (message, rotate) = LiveProtocol.MapSetupCloseReason(null, null);
+        Assert.Equal("Network error — check connection", message);
+        Assert.False(rotate);
+    }
+
+    [Fact]
+    public async Task ConnectAndSetup_ServerCloseWithModelReason_RecordsModelFailure()
+    {
+        var (socket, session) = Setup();
+        socket.CloseCode = 1008;
+        socket.CloseReason =
+            "models/m-live is not found for API version v1beta, or is not supported for bidiGenerateContent. Call ListModels";
+        socket.EnqueueClose();
+
+        Assert.False(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+
+        var fail = Assert.IsType<LiveAttemptOutcome.Fail>(session.SetupFailure);
+        Assert.Equal("Model not available for Live — check Settings", fail.Message);
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ConnectAndSetup_ServerCloseWithQuotaReason_RecordsRotate()
+    {
+        var (socket, session) = Setup();
+        socket.CloseCode = 1011;
+        socket.CloseReason = "Quota exceeded for quota metric 'Live API requests'";
+        socket.EnqueueClose();
+
+        Assert.False(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+
+        Assert.IsType<LiveAttemptOutcome.Rotate>(session.SetupFailure);
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ConnectAndSetup_ServerCloseWithoutReason_StaysNetworkError()
+    {
+        var (socket, session) = Setup();
+        socket.EnqueueClose();
+
+        Assert.False(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+
+        var fail = Assert.IsType<LiveAttemptOutcome.Fail>(session.SetupFailure);
+        Assert.Equal("Network error — check connection", fail.Message);
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public void BuildLiveUri_OmitsExplicitPort()
+    {
+        var uri = LiveProtocol.BuildLiveUri("generativelanguage.googleapis.com", "k");
+        Assert.True(uri.IsDefaultPort);
+        Assert.DoesNotContain(":443", uri.ToString());
+    }
+
     // --- LiveSession.SetupFailure ---
 
     [Fact]

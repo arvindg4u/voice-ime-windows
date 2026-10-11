@@ -156,9 +156,47 @@ internal static class LiveProtocol
         return DefaultHost;
     }
 
-    /// <summary>Live wss URI: RPC path with the key attached as an escaped query parameter.</summary>
+    /// <summary>Live wss URI: RPC path with the key attached as an escaped query parameter.
+    /// Port stays implicit (no ":443" in the authority) so the handshake Host header
+    /// matches the Android client's byte-for-byte.</summary>
     internal static Uri BuildLiveUri(string host, string key) =>
-        new UriBuilder("wss", host, 443, RpcPath, "?key=" + Uri.EscapeDataString(key)).Uri;
+        new UriBuilder("wss", host, -1, RpcPath, "?key=" + Uri.EscapeDataString(key)).Uri;
+
+    /// <summary>
+    /// Maps a server-initiated WebSocket close during Live setup to a typed
+    /// user-safe message plus whether the caller should rotate keys. The
+    /// Gemini Live endpoint accepts the handshake and then CLOSES with the
+    /// real error in the close reason — observed in the wild as
+    /// 1008 "models/X is not found for API version v1beta, or is not
+    /// supported for bidiGenerateContent", 1007 "Request contains an invalid
+    /// argument", 1011 quota/internal errors. Dropping the reason turns all
+    /// of them into a bogus "Network error". Never echoes the raw reason to
+    /// the user; the socket layer logs it (key-free) for diagnosis.
+    /// </summary>
+    internal static (string Message, bool Rotate) MapSetupCloseReason(int? closeCode, string? reason)
+    {
+        var text = (reason ?? string.Empty).ToLowerInvariant();
+
+        if (text.Contains("not found") || text.Contains("not supported for bidigeneratecontent")
+            || text.Contains("call listmodels"))
+            return ("Model not available for Live — check Settings", false);
+
+        if (text.Contains("api key") || text.Contains("unauthenticated")
+            || text.Contains("permission"))
+            return ("Invalid API key — check Settings", false);
+
+        if (text.Contains("quota") || text.Contains("resource_exhausted")
+            || text.Contains("resource exhausted") || text.Contains("rate limit"))
+            return ("Rate limited on all keys — retry later", true);
+
+        if (text.Contains("invalid argument") || closeCode == 1007)
+            return ("Live setup rejected by server — check model in Settings", false);
+
+        if (closeCode is int code && code != 1000)
+            return ($"Server error (close {code}) — try again", false);
+
+        return ("Network error — check connection", false);
+    }
 
     /// <summary>
     /// Strips the WAV header, returning raw 16 kHz 16-bit mono PCM for the Live

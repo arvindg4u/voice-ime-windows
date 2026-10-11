@@ -28,6 +28,16 @@ internal interface ILiveSocket : IAsyncDisposable
     // OCE on cancellation passes through unwrapped.
     Task<string?> ReceiveTextAsync(CancellationToken ct);
     Task CloseAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Close code observed when <see cref="ReceiveTextAsync"/> returned null
+    /// (server-initiated close), else null. Default interface members so
+    /// scripted fakes keep compiling unchanged.
+    /// </summary>
+    int? CloseCode => null;
+
+    /// <summary>Close reason paired with <see cref="CloseCode"/>; never contains the key.</summary>
+    string? CloseReason => null;
 }
 
 internal interface ILiveSocketFactory
@@ -41,6 +51,12 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
     private readonly ClientWebSocket _socket = new();
     private bool _disposed;
 
+    /// <inheritdoc />
+    public int? CloseCode { get; private set; }
+
+    /// <inheritdoc />
+    public string? CloseReason { get; private set; }
+
     public async Task ConnectAsync(Uri uri, CancellationToken ct)
     {
         // Best practice (.NET 7+): collect the upgrade response so a rejected
@@ -48,9 +64,13 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
         // rate limit, …) instead of being guessed from exception text. An
         // instant 403 must surface as "Invalid API key", never as a timeout.
         _socket.Options.CollectHttpResponseDetails = true;
+        // Keep the long-lived dictation socket alive through NAT/proxy idle
+        // windows (Google terminates silent connections).
+        _socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
         try
         {
             await _socket.ConnectAsync(uri, ct);
+            Logger.Debug("live-wire: handshake ok");
         }
         catch (WebSocketException ex)
         {
@@ -58,6 +78,9 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
             var (message, _) = status > 0
                 ? LiveProtocol.MapHandshakeStatus(status)
                 : LiveProtocol.MapHandshakeError(ex.Message);
+            // Key-free diagnosis trail (Android live-wire log parity): the
+            // status and exception type only — never the URI or key.
+            Logger.Warning($"live-wire: handshake failed http={status} ({ex.WebSocketErrorCode})");
             throw new LiveSocketException(message, ex);
         }
     }
@@ -71,6 +94,7 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
         }
         catch (WebSocketException ex)
         {
+            Logger.Warning($"live-wire: send failed ({ex.WebSocketErrorCode})");
             throw new LiveSocketException("Network error — check connection", ex);
         }
     }
@@ -84,6 +108,17 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
             var result = await ReceiveSegmentAsync(buffer, ct);
             if (result.MessageType == WebSocketMessageType.Close)
             {
+                // Record WHY the server closed: the Gemini Live endpoint
+                // reports setup errors (bad model, quota, invalid argument)
+                // through the close frame, not the handshake. The reason is
+                // server text and never contains the key; truncated for logs.
+                CloseCode = result.CloseStatus is WebSocketCloseStatus status
+                    ? (int)status
+                    : null;
+                CloseReason = result.CloseStatusDescription;
+                var reasonForLog = (CloseReason ?? string.Empty);
+                if (reasonForLog.Length > 200) reasonForLog = reasonForLog[..200];
+                Logger.Info($"live-wire: server closed code={CloseCode?.ToString() ?? "?"} reason=\"{reasonForLog}\"");
                 await ReplyCloseAsync(ct);
                 return null;
             }

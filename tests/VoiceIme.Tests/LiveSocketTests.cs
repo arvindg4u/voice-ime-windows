@@ -16,6 +16,10 @@ internal sealed class FakeLiveSocket : ILiveSocket
     public bool Disposed { get; private set; }
     public bool CloseRequested { get; private set; }
 
+    /// <summary>Scriptable close info (ILiveSocket default members overridden).</summary>
+    public int? CloseCode { get; set; }
+    public string? CloseReason { get; set; }
+
     public void EnqueueText(string text) { lock (_inbound) _inbound.Enqueue(text); _gate.TrySetResult(); }
     public void EnqueueFailure(Exception ex) { lock (_inbound) _inbound.Enqueue(ex); _gate.TrySetResult(); }
     public void EnqueueClose() { lock (_inbound) _inbound.Enqueue(CloseSignal.Instance); _gate.TrySetResult(); }

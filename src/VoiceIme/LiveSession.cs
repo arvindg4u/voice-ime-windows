@@ -446,7 +446,19 @@ internal sealed class LiveSession : IAsyncDisposable
             {
                 var message = await _socket.ReceiveTextAsync(setupCts.Token);
                 if (message is null)
-                    return new LiveAttemptOutcome.Fail(NetworkError, null);
+                {
+                    // Server closed before acking setup. The Gemini Live
+                    // endpoint delivers setup errors THROUGH the close frame
+                    // (1008 model-not-found, 1007 invalid argument, 1011
+                    // quota) — map the recorded reason to the typed message
+                    // instead of collapsing everything to "Network error".
+                    var (closeMessage, rotate) = LiveProtocol.MapSetupCloseReason(
+                        _socket.CloseCode, _socket.CloseReason);
+                    return rotate
+                        ? new LiveAttemptOutcome.Rotate()
+                        : new LiveAttemptOutcome.Fail(closeMessage, null);
+                }
+
                 if (!_guard.IsCurrent(_sessionId))
                     continue;
                 if (LiveProtocol.IsLiveSetupComplete(message))
