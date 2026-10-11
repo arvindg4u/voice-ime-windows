@@ -30,8 +30,14 @@ jobs:
           /p:IncludeNativeLibrariesForSelfExtract=true
           -o publish
 
-      - name: Attach EXE to GitHub Release
+      - name: Build installer (Inno Setup)
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\VoiceIme.iss
+
+      - name: Attach EXE and installer to GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: publish/VoiceIme.exe
+          files: |
+            publish/VoiceIme.exe
+            installer/Output/VoiceIme-Setup-*.exe
           generate_release_notes: true

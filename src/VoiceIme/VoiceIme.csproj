@@ -11,12 +11,25 @@
     <AssemblyName>VoiceIme</AssemblyName>
     <RootNamespace>VoiceIme</RootNamespace>
     <Version>1.0.0</Version>
+    <!-- Windows shell identity: EXE icon, DPI/OS manifest, file metadata. -->
+    <ApplicationIcon>Assets\voiceime.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>Voice IME</Product>
+    <AssemblyTitle>Voice IME</AssemblyTitle>
+    <Description>Tray-first voice dictation for Windows — press a hotkey, speak, paste anywhere.</Description>
+    <Company>Voice IME</Company>
+    <Copyright>Copyright © Voice IME contributors</Copyright>
     <!-- Single-file self-contained EXE: the only artifact CI ships. -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF resource: MainWindow/OverlayWindow title-bar icon via pack URI. -->
+    <Resource Include="Assets\voiceime.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />

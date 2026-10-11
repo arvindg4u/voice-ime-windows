@@ -24,6 +24,51 @@ public static class StartupShell
     public const string ExeFileName = "VoiceIme.exe";
 
     /// <summary>
+    /// Argument the logon shortcut (and installer autostart entry) passes so
+    /// a sign-in launch starts in the tray without flashing the window.
+    /// </summary>
+    public const string HiddenLaunchArg = "--hidden";
+
+    /// <summary>
+    /// True when a command-line argument requests a tray-only (hidden)
+    /// launch. Accepts the canonical <c>--hidden</c> plus common aliases so
+    /// hand-written shortcuts keep working. Case-insensitive, never throws.
+    /// </summary>
+    public static bool IsHiddenLaunchArg(string? arg) =>
+        arg is not null && arg.Trim().ToLowerInvariant()
+            is "--hidden" or "/hidden" or "-hidden"
+            or "--tray" or "/tray"
+            or "--minimized" or "/minimized" or "--background";
+
+    /// <summary>
+    /// Launch visibility decision: an interactive double-click must always
+    /// produce something visible, so the window shows unless the user opted
+    /// into a hidden start (StartHidden setting) or the launch itself asked
+    /// for the tray (autostart shortcut passes <see cref="HiddenLaunchArg"/>).
+    /// Pure and unit-testable — App only executes the result.
+    /// </summary>
+    public static bool ShouldShowWindowAtLaunch(bool startHidden, string[]? args)
+    {
+        if (startHidden)
+        {
+            return false;
+        }
+
+        if (args is not null)
+        {
+            foreach (var arg in args)
+            {
+                if (IsHiddenLaunchArg(arg))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// EXE path for the logon shortcut. Prefers the running process path;
     /// falls back to the app directory plus the known EXE name. Pure and
     /// unit-testable — and it keeps the single-file-incompatible

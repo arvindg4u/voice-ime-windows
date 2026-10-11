@@ -32,8 +32,21 @@ jobs:
           /p:IncludeNativeLibrariesForSelfExtract=true
           -o publish
 
-      - name: Upload EXE artifact
+      # Inno Setup is preinstalled on windows-latest runners. The installer
+      # wraps the same single-file EXE with Start-menu shortcut, per-user
+      # install (no admin) and a clean uninstaller.
+      - name: Build installer (Inno Setup)
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\VoiceIme.iss
+
+      - name: Upload EXE artifact (portable)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: voice-ime-windows
           path: publish/VoiceIme.exe
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: voice-ime-windows-setup
+          path: installer/Output/VoiceIme-Setup-*.exe

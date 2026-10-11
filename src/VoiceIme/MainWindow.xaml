@@ -4,6 +4,7 @@
         xmlns:local="clr-namespace:VoiceIme"
         Title="Voice IME — Settings" Width="680" Height="570"
         MinWidth="680" MinHeight="570"
+        Icon="pack://application:,,,/VoiceIme;component/Assets/voiceime.ico"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource HandyBackground}">
     <!-- Handy shell (Task 2): fixed 160px sidebar + scrollable content + footer.

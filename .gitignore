@@ -3,6 +3,8 @@
 [Bb]in/
 [Oo]bj/
 publish/
+# Inno Setup compiler output
+installer/Output/
 [Test]est[Rr]esult*/
 *.user
 .vs/

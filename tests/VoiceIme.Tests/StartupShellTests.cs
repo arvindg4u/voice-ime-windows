@@ -68,4 +68,60 @@ public sealed class StartupShellTests
         Assert.Throws<ArgumentException>(
             () => StartupShell.ExePathForShortcut(null, baseDir!));
     }
+
+    // --- Launch visibility (double-click must always show something) ---
+
+    [Fact]
+    public void ShouldShowWindowAtLaunch_DefaultLaunch_ShowsWindow()
+    {
+        Assert.True(StartupShell.ShouldShowWindowAtLaunch(
+            startHidden: false, args: Array.Empty<string>()));
+        Assert.True(StartupShell.ShouldShowWindowAtLaunch(
+            startHidden: false, args: null));
+    }
+
+    [Fact]
+    public void ShouldShowWindowAtLaunch_StartHiddenSetting_StaysInTray()
+    {
+        Assert.False(StartupShell.ShouldShowWindowAtLaunch(
+            startHidden: true, args: Array.Empty<string>()));
+    }
+
+    [Theory]
+    [InlineData("--hidden")]
+    [InlineData("--HIDDEN")]
+    [InlineData("/hidden")]
+    [InlineData("-hidden")]
+    [InlineData("--tray")]
+    [InlineData("/tray")]
+    [InlineData("--minimized")]
+    [InlineData("/minimized")]
+    [InlineData("--background")]
+    [InlineData("  --hidden  ")]
+    public void ShouldShowWindowAtLaunch_HiddenArg_StaysInTray(string arg)
+    {
+        Assert.False(StartupShell.ShouldShowWindowAtLaunch(
+            startHidden: false, args: new[] { arg }));
+        Assert.True(StartupShell.IsHiddenLaunchArg(arg));
+    }
+
+    [Theory]
+    [InlineData("--help")]
+    [InlineData("hidden")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void IsHiddenLaunchArg_UnrelatedArgs_AreVisible(string? arg)
+    {
+        Assert.False(StartupShell.IsHiddenLaunchArg(arg));
+        Assert.True(StartupShell.ShouldShowWindowAtLaunch(
+            startHidden: false,
+            args: arg is null ? null : new[] { arg }));
+    }
+
+    [Fact]
+    public void HiddenLaunchArg_IsTheCanonicalShortcutArgument()
+    {
+        Assert.Equal("--hidden", StartupShell.HiddenLaunchArg);
+        Assert.True(StartupShell.IsHiddenLaunchArg(StartupShell.HiddenLaunchArg));
+    }
 }

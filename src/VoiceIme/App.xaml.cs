@@ -69,6 +69,68 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Fail loudly, never silently: a WinExe with no handler dies with no
+        // window, no dialog and no log line — exactly the "double-click and
+        // nothing happens" failure mode. Handlers go in before anything that
+        // can throw.
+        RegisterGlobalExceptionHandlers();
+
+        try
+        {
+            StartupCore(e);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"fatal startup failure: {ex.GetType().Name}: {ex.Message}");
+            Logger.Error(ex.StackTrace ?? "(no stack trace)");
+            System.Windows.MessageBox.Show(
+                $"Voice IME could not start.\n\n{ex.GetType().Name}: {ex.Message}\n\n"
+                + $"Details were written to:\n{Logger.LogPath}",
+                "Voice IME — startup error",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            Shutdown(1);
+        }
+    }
+
+    /// <summary>
+    /// Last-line crash safety net. The dispatcher handler keeps the tray app
+    /// alive (one failed UI action must not kill dictation); the AppDomain
+    /// handler can only log — the process is already going down. Unobserved
+    /// task faults are logged and observed so they never escalate.
+    /// </summary>
+    private void RegisterGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            Logger.Error($"unhandled dispatcher exception: {args.Exception.GetType().Name}: {args.Exception.Message}");
+            Logger.Error(args.Exception.StackTrace ?? "(no stack trace)");
+            _notifier.Notify(
+                "Voice IME error",
+                $"{args.Exception.GetType().Name}: {args.Exception.Message}",
+                NotificationSeverity.Error);
+            args.Handled = true;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            var ex = args.ExceptionObject as Exception;
+            Logger.Error($"unhandled domain exception (terminating={args.IsTerminating}): "
+                + $"{ex?.GetType().Name}: {ex?.Message}");
+            Logger.Error(ex?.StackTrace ?? "(no stack trace)");
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            Logger.Error($"unobserved task exception: {args.Exception.GetType().Name}: {args.Exception.Message}");
+            args.SetObserved();
+        };
+    }
+
+    private void StartupCore(StartupEventArgs e)
+    {
+        Logger.Info("startup: begin");
+
         // Task 9 single-instance: the second instance asks the running one
         // to show its settings window (via the HotkeyWindow broadcast) and
         // exits — never a second tray icon.
@@ -117,7 +179,7 @@ public partial class App : System.Windows.Application
         {
             Text = TrayText(_settings.Hotkey),
             Visible = _settings.ShowTrayIcon,
-            Icon = System.Drawing.SystemIcons.Information,
+            Icon = LoadAppIcon(),
             ContextMenuStrip = BuildMenu(),
         };
         _tray.DoubleClick += (_, _) => HandleToggleInput();
@@ -135,6 +197,56 @@ public partial class App : System.Windows.Application
         // OpenHistory), so tray launch is the default.
         ReconcileAutostart();
         EnforceTrayGuard();
+
+        // Launch visibility: an interactive double-click must always show
+        // something. Windows 11 hides tray icons in the overflow flyout by
+        // default, so a tray-only start looks exactly like "the EXE does
+        // nothing". The window shows unless the user opted into StartHidden
+        // or the launch asked for the tray (autostart passes --hidden); a
+        // hidden start still announces itself once via a balloon tip.
+        if (StartupShell.ShouldShowWindowAtLaunch(_settings.StartHidden, e.Args))
+        {
+            _mainWindow ??= CreateMainWindow();
+            AttachLiveHotkey(_mainWindow);
+            ShowMainWindow();
+        }
+        else if (_settings.ShowTrayIcon)
+        {
+            _tray?.ShowBalloonTip(
+                3000,
+                "Voice IME is running",
+                $"Press {_settings.Hotkey} to dictate. Find me in the system tray.",
+                ToolTipIcon.Info);
+        }
+
+        Logger.Info("startup: complete");
+    }
+
+    /// <summary>
+    /// Tray icon: the branded icon embedded in the EXE (works from the
+    /// single-file publish via the associated-icon shell API), falling back
+    /// to a stock system icon so the tray never ends up iconless.
+    /// </summary>
+    private static System.Drawing.Icon LoadAppIcon()
+    {
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+                if (icon is not null)
+                {
+                    return icon;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"app icon load failed ({ex.GetType().Name}) — using system fallback.");
+        }
+
+        return System.Drawing.SystemIcons.Information;
     }
 
     /// <summary>
@@ -1147,6 +1259,7 @@ public partial class App : System.Windows.Application
             {
                 shortcut.TargetPath = StartupShell.ExePathForShortcut(
                     Environment.ProcessPath, AppContext.BaseDirectory);
+                shortcut.Arguments = StartupShell.HiddenLaunchArg;
                 shortcut.WorkingDirectory = AppContext.BaseDirectory;
                 shortcut.Description = "Voice IME — launch to the tray at sign-in";
                 shortcut.Save();

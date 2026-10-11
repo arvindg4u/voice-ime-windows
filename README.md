@@ -90,21 +90,39 @@ for Windows keeps the Android core (record 16 kHz WAV → Gemini
 
 ## 🚀 Quick start
 
-**You need:** Windows 10+ (x64) and a
-[Gemini API key](https://aistudio.google.com/apikey). No install, no admin —
-it's a single portable EXE.
+**You need:** Windows 10 (1809+) or 11 (x64) and a
+[Gemini API key](https://aistudio.google.com/apikey). No admin rights needed.
+
+**Option A — Installer (recommended):**
 
 ```text
-1. Open Releases → download VoiceIme.exe
+1. Open Releases → download VoiceIme-Setup-<version>.exe
    https://github.com/arvindg4u/voice-ime-windows/releases
-   (or Actions → latest Windows run → Artifacts → voice-ime-windows)
-2. Run VoiceIme.exe — it lives in the tray.
-3. Tray → Settings… → paste Base URL / API keys / Model → Save → Test.
+2. Run it — installs per-user (no admin), adds a Start-menu entry
+   and an uninstaller. Launches Voice IME when done.
+3. The settings window opens on launch. Paste Base URL / API keys /
+   Model in the Gemini section → Save → Test.
 4. Focus any text field, press Ctrl+Shift+Space, talk, press it again.
 ```
 
-> **Launch at login:** press `Win+R` → `shell:startup` → drop a shortcut to
-> `VoiceIme.exe` there.
+**Option B — Portable EXE:**
+
+```text
+1. Open Releases → download VoiceIme.exe
+   (or Actions → latest Windows run → Artifacts → voice-ime-windows)
+2. Run VoiceIme.exe — the settings window opens and the mic icon
+   appears in the system tray.
+```
+
+> **Windows SmartScreen:** an unsigned download may show "Windows protected
+> your PC" — click **More info → Run anyway**. If nothing at all appears,
+> check `%AppData%\VoiceIme\logs\voiceime.log` and the tray overflow (the
+> `^` chevron next to the clock).
+
+> **Launch at sign-in:** Settings → **Advanced → Autostart**. The app
+> creates/removes the Startup shortcut itself (started this way it stays in
+> the tray via `--hidden`). To start tray-only every time, enable
+> **Start hidden**; run `VoiceIme.exe --hidden` for a one-off tray launch.
 
 ---
 
@@ -222,6 +240,9 @@ dotnet test VoiceIme.Windows.sln -c Release
 # Single-file EXE → publish/VoiceIme.exe
 dotnet publish src/VoiceIme/VoiceIme.csproj -c Release -r win-x64 --self-contained `
   /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+# Installer → installer/Output/VoiceIme-Setup-<version>.exe (needs Inno Setup 6)
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\VoiceIme.iss
 ```
 
 > You don't need to — CI builds the EXE on every push. This is for contributors.
