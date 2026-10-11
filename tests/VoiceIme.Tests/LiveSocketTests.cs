@@ -20,9 +20,11 @@ internal sealed class FakeLiveSocket : ILiveSocket
     public int? CloseCode { get; set; }
     public string? CloseReason { get; set; }
 
-    public void EnqueueText(string text) { lock (_inbound) _inbound.Enqueue(text); _gate.TrySetResult(); }
-    public void EnqueueFailure(Exception ex) { lock (_inbound) _inbound.Enqueue(ex); _gate.TrySetResult(); }
-    public void EnqueueClose() { lock (_inbound) _inbound.Enqueue(CloseSignal.Instance); _gate.TrySetResult(); }
+    // Enqueue + release under one lock: a reader that swapped the gate while
+    // waiting must see either the item or the signal, never neither.
+    public void EnqueueText(string text) { lock (_inbound) { _inbound.Enqueue(text); _gate.TrySetResult(); } }
+    public void EnqueueFailure(Exception ex) { lock (_inbound) { _inbound.Enqueue(ex); _gate.TrySetResult(); } }
+    public void EnqueueClose() { lock (_inbound) { _inbound.Enqueue(CloseSignal.Instance); _gate.TrySetResult(); } }
 
     public Task ConnectAsync(Uri uri, CancellationToken ct)
     {
@@ -53,6 +55,11 @@ internal sealed class FakeLiveSocket : ILiveSocket
                     if (next is Exception ex) throw ex;
                     return (string)next;
                 }
+                // Re-arm a consumed gate so an empty queue blocks instead of
+                // hot-spinning (the session-long reader loops back here after
+                // draining every scripted message).
+                if (_gate.Task.IsCompleted)
+                    _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 wait = _gate.Task;
             }
             await wait.WaitAsync(ct);

@@ -35,10 +35,15 @@ internal abstract record LiveAttemptOutcome
 
 /// <summary>
 /// One Gemini Live attempt: setup gating, chunked PCM streaming, bounded finalize.
-/// Linear flow, no background threads: the receive loops below are driven inline
-/// and each phase reaches exactly one return path per outcome by construction, so
-/// no TaskCompletionSource or Interlocked coordination is needed for exactly-once
-/// completion. Every received message first checks the session guard — a stale
+/// Setup is linear (connect → setup → ACK, driven inline); once the ACK lands,
+/// streaming mode runs a single session-long receive loop concurrently with the
+/// audio sends — the official Live API contract delivers interim and final
+/// transcription events WHILE audio streams, so the reader must consume them in
+/// real time (one concurrent send + one concurrent receive, which ClientWebSocket
+/// permits). The reader never faults: every exit settles with an outcome, so the
+/// finalize phase awaits it unconditionally and exactly-once completion still
+/// needs no extra coordination. Every received message first checks the session
+/// guard — a stale
 /// session ignores everything and never streams. Every socket call observes the
 /// LiveTimeout-linked token (derived from the caller's token), so the outer bound
 /// covers hung sends and connects as well as receives; caller cancellation still
@@ -62,7 +67,14 @@ internal sealed class LiveSession : IAsyncDisposable
     private bool _disposed;
     private CancellationTokenSource? _sessionCts;
     private bool _activityStarted;
-    private bool _completed;
+    private volatile bool _completed;
+
+    // Streaming-mode concurrent reader (official Live API flow: transcription
+    // events arrive WHILE audio streams, not after). Started by
+    // ConnectAndSetupAsync on success; finals accumulate here and the
+    // finalize phase awaits the loop's authoritative outcome.
+    private Task<LiveAttemptOutcome>? _receiveLoop;
+    private readonly FinalAccumulator _streamFinals = new();
 
     internal LiveSession(
         ILiveSocket socket,
@@ -286,6 +298,11 @@ internal sealed class LiveSession : IAsyncDisposable
                 TearDownSession();
                 return false;
             }
+            // Official Live API flow: transcription events (interim + final)
+            // arrive concurrently WHILE audio streams. Start the session-long
+            // reader now so previews surface in real time, server frames never
+            // back up unread, and finals emitted mid-session are not lost.
+            _receiveLoop = ReceiveLoopAsync(liveToken);
             return true;
         }
         catch (TransportFallbackException ex)
@@ -357,6 +374,12 @@ internal sealed class LiveSession : IAsyncDisposable
             }
             catch (LiveSocketException ex)
             {
+                // The server may close right after delivering the final (the
+                // reader already committed it); prefer that authoritative
+                // result over surfacing the late send failure.
+                if (_receiveLoop is { IsCompletedSuccessfully: true } settled
+                    && settled.Result is LiveAttemptOutcome.Done doneEarly)
+                    return doneEarly;
                 return MapSocketFailure(ex);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -364,7 +387,19 @@ internal sealed class LiveSession : IAsyncDisposable
                 return new LiveAttemptOutcome.Fail(TimedOut, null);
             }
 
-            return await ReadFinalAsync(liveToken, ct);
+            var loop = _receiveLoop;
+            if (loop is null)
+                return await ReadFinalAsync(liveToken, ct); // defensive: no reader started
+
+            // The reader has been consuming interims/finals all along; the end
+            // markers above prompt the server's finalized transcript. Bound the
+            // wait by FinalizeGrace, then commit whatever finals arrived
+            // (Android parity: grace expiry commits the snapshot, it does not
+            // discard a heard transcript as a timeout).
+            var first = await Task.WhenAny(loop, Task.Delay(_options.FinalizeGrace, CancellationToken.None));
+            if (first != loop)
+                TearDownSession(); // cancels liveToken → reader settles with its snapshot
+            return await loop;
         }
         catch (TransportFallbackException ex)
         {
@@ -484,6 +519,81 @@ internal sealed class LiveSession : IAsyncDisposable
         }
         await _socket.SendTextAsync(LiveProtocol.BuildLiveActivityEndJson(), ct);
         await _socket.SendTextAsync(LiveProtocol.BuildLiveAudioEndJson(), ct);
+    }
+
+    /// <summary>
+    /// Session-long reader for streaming mode, mirroring Android's reader
+    /// thread and the official Live API examples: consumes server frames
+    /// concurrently with audio sends, raising interim previews immediately
+    /// and accumulating finals as the server emits them (segments finalize at
+    /// pauses, not only after activityEnd). Exits on turn completion, server
+    /// close, or cancellation — and never faults: every exit path settles
+    /// with an outcome so the finalize phase can await it unconditionally.
+    /// </summary>
+    private async Task<LiveAttemptOutcome> ReceiveLoopAsync(CancellationToken liveToken)
+    {
+        try
+        {
+            while (true)
+            {
+                var message = await _socket.ReceiveTextAsync(liveToken).ConfigureAwait(false);
+                if (message is null)
+                {
+                    // Server closed. Commit what was heard (Android parity);
+                    // with nothing heard, surface the close reason if the
+                    // server gave one, else report the empty transcript.
+                    var snapshot = _streamFinals.Snapshot();
+                    if (snapshot.Length > 0)
+                        return new LiveAttemptOutcome.Done(snapshot);
+                    if (_socket.CloseCode is int code && code != 1000)
+                    {
+                        var (closeMessage, rotate) =
+                            LiveProtocol.MapSetupCloseReason(_socket.CloseCode, _socket.CloseReason);
+                        return rotate
+                            ? new LiveAttemptOutcome.Rotate()
+                            : new LiveAttemptOutcome.Fail(closeMessage, null);
+                    }
+                    return new LiveAttemptOutcome.Fail(EmptyTranscript, null);
+                }
+                if (!_guard.IsCurrent(_sessionId))
+                    continue;
+                if (LiveProtocol.HasLiveFinalTranscript(message))
+                {
+                    var advanced = AppendFinals(_streamFinals, message);
+                    var snapshot = _streamFinals.Snapshot();
+                    // A final that adds no new text (server echo of cumulative
+                    // input) is only treated as the end-of-turn signal once
+                    // finalize has begun — mid-session duplicates must not end
+                    // the reader while audio is still streaming.
+                    if (_completed && !advanced && snapshot.Length > 0)
+                        return new LiveAttemptOutcome.Done(snapshot);
+                    continue;
+                }
+                foreach (var preview in LiveProtocol.ParseLiveInputTranscripts(message))
+                    RaiseQuietly(InterimReceived, preview);
+                if (LiveProtocol.IsLiveTurnComplete(message))
+                    return SnapshotOrEmpty(_streamFinals);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // LiveTimeout, finalize-grace teardown, or caller cancellation:
+            // commit the snapshot gathered so far rather than hard-failing.
+            return SnapshotOrEmpty(_streamFinals);
+        }
+        catch (LiveSocketException ex)
+        {
+            var snapshot = _streamFinals.Snapshot();
+            return snapshot.Length > 0
+                ? new LiveAttemptOutcome.Done(snapshot)
+                : MapSocketFailure(ex);
+        }
+        catch (Exception)
+        {
+            // The reader must never fault: a faulted task would turn the
+            // awaited finalize into an unmapped exception. Snapshot wins.
+            return SnapshotOrEmpty(_streamFinals);
+        }
     }
 
     private async Task<LiveAttemptOutcome> ReadFinalAsync(CancellationToken liveToken, CancellationToken ct)

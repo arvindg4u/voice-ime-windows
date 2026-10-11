@@ -124,6 +124,95 @@ public sealed class LiveSessionStreamingTests
     }
 
     [Fact]
+    public async Task Streaming_InterimDuringSpeech_RaisesPreviewBeforeFinalize()
+    {
+        // Docs flow: interimInputTranscription events arrive WHILE audio
+        // streams; the session-long reader must surface them without waiting
+        // for CompleteAndReadFinalAsync.
+        var (socket, session) = Setup();
+        var interim = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.InterimReceived += text => interim.TrySetResult(text);
+        socket.EnqueueText("""{"setupComplete":{}}""");
+        Assert.True(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+        await session.SendPcmAsync(new byte[] { 1, 2 }, CancellationToken.None);
+
+        socket.EnqueueText("""{"serverContent":{"interimInputTranscription":{"text":"hel"}}}""");
+
+        Assert.Equal("hel", await interim.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Streaming_FinalDuringSpeech_AccumulatesBeforeFinalize()
+    {
+        // Finals are emitted continuously as segments finalize at pauses —
+        // mid-session finals must be committed, not lost before finalize.
+        var (socket, session) = Setup();
+        var final = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.FinalReceived += delta => final.TrySetResult(delta);
+        socket.EnqueueText("""{"setupComplete":{}}""");
+        Assert.True(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+        socket.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"hello "}}}""");
+        Assert.Equal("hello ", await final.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        socket.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"world"}}}""");
+        socket.EnqueueText("""{"serverContent":{"turnComplete":true}}""");
+
+        var outcome = await session.CompleteAndReadFinalAsync(CancellationToken.None);
+        var done = Assert.IsType<LiveAttemptOutcome.Done>(outcome);
+        Assert.Equal("hello world", done.Text);
+    }
+
+    [Fact]
+    public async Task Complete_NoTurnComplete_CommitsSnapshotAfterGrace()
+    {
+        // Android parity: grace expiry commits whatever was heard instead of
+        // discarding a real transcript as a timeout.
+        var (socket, session) = Setup();
+        socket.EnqueueText("""{"setupComplete":{}}""");
+        Assert.True(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+        socket.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"kept"}}}""");
+
+        var outcome = await session.CompleteAndReadFinalAsync(CancellationToken.None);
+
+        var done = Assert.IsType<LiveAttemptOutcome.Done>(outcome);
+        Assert.Equal("kept", done.Text);
+        Assert.True(socket.CloseRequested && socket.Disposed);
+    }
+
+    [Fact]
+    public async Task Streaming_ServerCloseAfterFinal_CommitsSnapshot()
+    {
+        // Session limit / server-initiated close after delivering finals:
+        // commit on close, mirroring Android's onClosed handler.
+        var (socket, session) = Setup();
+        socket.EnqueueText("""{"setupComplete":{}}""");
+        Assert.True(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+        socket.EnqueueText("""{"serverContent":{"inputTranscription":{"text":"heard it"}}}""");
+        socket.EnqueueClose();
+
+        var outcome = await session.CompleteAndReadFinalAsync(CancellationToken.None);
+
+        var done = Assert.IsType<LiveAttemptOutcome.Done>(outcome);
+        Assert.Equal("heard it", done.Text);
+    }
+
+    [Fact]
+    public async Task Streaming_ServerErrorCloseWithoutFinals_MapsCloseReason()
+    {
+        var (socket, session) = Setup();
+        socket.CloseCode = 1011;
+        socket.CloseReason = "quota exceeded";
+        socket.EnqueueText("""{"setupComplete":{}}""");
+        Assert.True(await session.ConnectAndSetupAsync(Uri, CancellationToken.None));
+        socket.EnqueueClose();
+
+        var outcome = await session.CompleteAndReadFinalAsync(CancellationToken.None);
+
+        Assert.IsType<LiveAttemptOutcome.Rotate>(outcome);
+    }
+
+    [Fact]
     public async Task Streaming_StaleGuard_IgnoresAck()
     {
         var guard = new LiveSessionGuard();
