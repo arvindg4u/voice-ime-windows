@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using VoiceIme.Theme;
 
 namespace VoiceIme;
 
@@ -66,6 +67,16 @@ public partial class MainWindow : Window
         Func<object?>? createAboutView = null)
     {
         InitializeComponent();
+
+        // Native chrome follows the Handy theme: WPF repaints the client area
+        // via DynamicResource, but the Win32 title bar needs the DWM immersive
+        // dark-mode attribute — set once the HWND exists and again on every
+        // theme swap. Unhooked on Closed so test-constructed windows never
+        // leak static-event subscriptions.
+        SourceInitialized += (_, _) => ThemeManager.ApplyWindowChrome(this);
+        ThemeManager.ThemeApplied += OnThemeApplied;
+        Closed += (_, _) => ThemeManager.ThemeApplied -= OnThemeApplied;
+
         VersionText.Text = "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
         BuildNav();
         var general = createGeneralView?.Invoke();
@@ -161,6 +172,8 @@ public partial class MainWindow : Window
     /// Permits the next close to proceed. Called only by the tray Quit path;
     /// every other close hides to tray instead.
     /// </summary>
+    private void OnThemeApplied(HandyTheme _) => ThemeManager.ApplyWindowChrome(this);
+
     internal void PermitClose() => _permitClose = true;
 
     /// <summary>

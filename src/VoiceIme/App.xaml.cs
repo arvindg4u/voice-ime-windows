@@ -143,8 +143,17 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(ThemeManager.SystemPreference));
+        // Settings load FIRST so the saved theme preference wins at startup —
+        // the old order applied "system" unconditionally, so a user who chose
+        // Dark/Light got the wrong palette until they reopened the About view.
         _settings = SettingsStore.Load();
+        ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(_settings.Theme));
+
+        // Follow the OS theme live while the preference is "system": Windows
+        // raises UserPreferenceChanged(General) when Personalization → Colors
+        // flips. Marshal to the dispatcher — the event fires on a broadcast
+        // thread, and brush swaps must happen on the UI thread.
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         _recorder.AutoStopped += HandleAutoStop;
         _recorder.LevelChanged += level =>
             _overlay?.SetLevel(SoundFeedback.ApplyDisplayGain(level, _settings.Volume));
@@ -220,6 +229,36 @@ public partial class App : System.Windows.Application
         }
 
         Logger.Info("startup: complete");
+    }
+
+    /// <summary>
+    /// OS theme change while the preference is "system": re-resolve and apply
+    /// (Dark/Light preferences ignore the OS). Windows reports the
+    /// Personalization → Colors flip under the General category; filtering on
+    /// it keeps re-applies cheap and rare. Never throws — a failed re-theme
+    /// must not take down the broadcast handler.
+    /// </summary>
+    private void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category != Microsoft.Win32.UserPreferenceCategory.General)
+        {
+            return;
+        }
+
+        try
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (string.Equals(_settings.Theme, AppThemes.System, StringComparison.Ordinal))
+                {
+                    ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(_settings.Theme));
+                }
+            });
+        }
+        catch
+        {
+            // Dispatcher gone at shutdown — nothing to re-theme.
+        }
     }
 
     /// <summary>
@@ -698,38 +737,83 @@ public partial class App : System.Windows.Application
 
         var keyIndex = ((_settings.KeyCursor % keys.Count) + keys.Count) % keys.Count;
         _liveKeyIndex = keyIndex;
-        var session = new LiveSession(
-            _llm.LiveSocketsForTests?.Create() ?? new ClientWebSocketLiveSocket(),
-            _settings.Model, _settings.SmartMode, _liveGuard, _liveGuard.Next());
-        session.InterimReceived += text => PublishLivePreview(text, false);
-        session.FinalReceived += delta => PublishLivePreview(delta, true);
-        _liveSession = session;
-        var uri = LiveProtocol.BuildLiveUri(LiveProtocol.LiveHost(_settings.BaseUrl), keys[keyIndex]);
-        var setup = session.ConnectAndSetupAsync(uri, token);
-        _liveSetup = setup;
 
-        bool connected;
-        try
+        // Setup-stage key rotation (Android parity): nothing has streamed
+        // before the setup ACK — the pump buffers every chunk — so a
+        // rate-limited handshake safely retries the next key. Mid-stream
+        // failures still never rotate: a partial session cannot replay.
+        // Setup failures surface their TYPED message (invalid key, rate
+        // limit, server error) — an instant handshake rejection must never
+        // be mislabeled "Timed out".
+        LiveSession? session = null;
+        var connected = false;
+        var failureMessage = "Network error — check connection";
+        for (var attempt = 0; attempt < keys.Count; attempt++)
         {
-            connected = await setup;
-        }
-        catch (OperationCanceledException)
-        {
-            TeardownLivePump(pump, handler);
-            await DisposeLiveSessionQuietly(session);
-            ClearLiveFields();
-            _coordinator.NotifyUploadCancelled(generation);
-            return;
+            var idx = (keyIndex + attempt) % keys.Count;
+            _liveKeyIndex = idx;
+            var candidate = new LiveSession(
+                _llm.LiveSocketsForTests?.Create() ?? new ClientWebSocketLiveSocket(),
+                _settings.Model, _settings.SmartMode, _liveGuard, _liveGuard.Next());
+            candidate.InterimReceived += text => PublishLivePreview(text, false);
+            candidate.FinalReceived += delta => PublishLivePreview(delta, true);
+            session = candidate;
+            _liveSession = candidate;
+            var uri = LiveProtocol.BuildLiveUri(LiveProtocol.LiveHost(_settings.BaseUrl), keys[idx]);
+            var setup = candidate.ConnectAndSetupAsync(uri, token);
+            _liveSetup = setup;
+
+            try
+            {
+                connected = await setup;
+            }
+            catch (OperationCanceledException)
+            {
+                TeardownLivePump(pump, handler);
+                await DisposeLiveSessionQuietly(candidate);
+                ClearLiveFields();
+                _coordinator.NotifyUploadCancelled(generation);
+                return;
+            }
+
+            if (connected)
+                break;
+
+            // Stop/cancel/new-generation landed mid-handshake: the common
+            // block below settles this attempt — never retry past it.
+            if (_liveFailed
+                || generation != _coordinator.Generation
+                || _coordinator.State != DictationState.Recording
+                || token.IsCancellationRequested)
+                break;
+
+            var setupFailure = candidate.SetupFailure;
+            if (setupFailure is LiveAttemptOutcome.Rotate && attempt < keys.Count - 1)
+            {
+                failureMessage = "Rate limited on all keys — retry later";
+                await DisposeLiveSessionQuietly(candidate);
+                continue;
+            }
+
+            failureMessage = setupFailure switch
+            {
+                LiveAttemptOutcome.Fail fail => fail.Message,
+                LiveAttemptOutcome.Rotate => "Rate limited on all keys — retry later",
+                _ => failureMessage,
+            };
+            break;
         }
 
         if (!connected
+            || session is null
             || _liveFailed
             || generation != _coordinator.Generation
             || _coordinator.State != DictationState.Recording
             || token.IsCancellationRequested)
         {
             TeardownLivePump(pump, handler);
-            await DisposeLiveSessionQuietly(session);
+            if (session is not null)
+                await DisposeLiveSessionQuietly(session);
             ClearLiveFields();
             if (!connected
                 && !_liveFailed
@@ -738,7 +822,7 @@ public partial class App : System.Windows.Application
                 && !token.IsCancellationRequested)
             {
                 _coordinator.ReportStartResult(
-                    generation, false, new TranscriptionError("Timed out — try again"));
+                    generation, false, new TranscriptionError(failureMessage));
             }
             else if (!_liveFailed)
             {
@@ -948,9 +1032,15 @@ public partial class App : System.Windows.Application
         if (!connected)
         {
             TeardownLivePump(pump, null);
+            var setupMessage = session.SetupFailure switch
+            {
+                LiveAttemptOutcome.Fail fail => fail.Message,
+                LiveAttemptOutcome.Rotate => "Rate limited on all keys — retry later",
+                _ => "Timed out — try again",
+            };
             await DisposeLiveSessionQuietly(session);
             if (ShouldCommitLiveTranscript(generation, token, _coordinator))
-                _coordinator.ReportUploadFailed(generation, new TranscriptionError("Timed out — try again"));
+                _coordinator.ReportUploadFailed(generation, new TranscriptionError(setupMessage));
             else
                 _coordinator.NotifyUploadCancelled(generation);
             return;
@@ -1642,6 +1732,15 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        try
+        {
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        }
+        catch
+        {
+            // Static broadcast source already torn down — nothing to detach.
+        }
+
         _singleInstance?.Dispose();
         _singleInstance = null;
         _releaseTimer?.Stop();

@@ -43,13 +43,21 @@ internal sealed class ClientWebSocketLiveSocket : ILiveSocket
 
     public async Task ConnectAsync(Uri uri, CancellationToken ct)
     {
+        // Best practice (.NET 7+): collect the upgrade response so a rejected
+        // handshake reports its real HTTP status (401/403 invalid key, 429
+        // rate limit, …) instead of being guessed from exception text. An
+        // instant 403 must surface as "Invalid API key", never as a timeout.
+        _socket.Options.CollectHttpResponseDetails = true;
         try
         {
             await _socket.ConnectAsync(uri, ct);
         }
         catch (WebSocketException ex)
         {
-            var (message, _) = LiveProtocol.MapHandshakeError(ex.Message);
+            var status = (int)_socket.HttpStatusCode;
+            var (message, _) = status > 0
+                ? LiveProtocol.MapHandshakeStatus(status)
+                : LiveProtocol.MapHandshakeError(ex.Message);
             throw new LiveSocketException(message, ex);
         }
     }

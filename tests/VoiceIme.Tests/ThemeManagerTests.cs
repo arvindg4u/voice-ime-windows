@@ -5,6 +5,7 @@ using Xunit;
 
 namespace VoiceIme.Tests;
 
+[Collection("ThemeStatics")]
 public sealed class ThemeManagerTests
 {
     [Fact]

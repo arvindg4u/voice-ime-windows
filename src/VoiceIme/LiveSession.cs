@@ -95,6 +95,15 @@ internal sealed class LiveSession : IAsyncDisposable
     /// </summary>
     internal event Action<string>? FinalReceived;
 
+    /// <summary>
+    /// Why <see cref="ConnectAndSetupAsync"/> returned false (typed Rotate or
+    /// Fail with the user-safe message), or null when setup succeeded / was
+    /// cancelled by the caller. Callers surface this instead of a hardcoded
+    /// message: an instant handshake rejection (invalid key, rate limit,
+    /// server error) must never be reported as "Timed out".
+    /// </summary>
+    internal LiveAttemptOutcome? SetupFailure { get; private set; }
+
     internal async Task<LiveAttemptOutcome> RunAsync(byte[] pcm, Uri uri, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(pcm);
@@ -213,6 +222,7 @@ internal sealed class LiveSession : IAsyncDisposable
         if (_sessionCts is not null)
             throw new InvalidOperationException("Session is already connected.");
 
+        SetupFailure = null;
         _sessionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _sessionCts.CancelAfter(_options.LiveTimeout);
         var liveToken = _sessionCts.Token;
@@ -223,15 +233,18 @@ internal sealed class LiveSession : IAsyncDisposable
             {
                 await _socket.ConnectAsync(uri, liveToken);
             }
-            catch (LiveSocketException)
+            catch (LiveSocketException ex)
             {
-                // Collapses Phase-2's Rotate/Fail mapping to false by design:
-                // this API reports only proceed/no-proceed.
+                // The bool contract reports only proceed/no-proceed; the typed
+                // Rotate/Fail mapping is preserved in SetupFailure so callers
+                // can show the real reason (and rotate keys on rate limits).
+                SetupFailure = MapSocketFailure(ex);
                 TearDownSession();
                 return false;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
+                SetupFailure = new LiveAttemptOutcome.Fail(TimedOut, null);
                 TearDownSession();
                 return false;
             }
@@ -240,13 +253,17 @@ internal sealed class LiveSession : IAsyncDisposable
             {
                 await _socket.SendTextAsync(LiveProtocol.BuildLiveSetupJson(_model, _smartMode), liveToken);
             }
-            catch (LiveSocketException)
+            catch (LiveSocketException ex)
             {
+                SetupFailure = IsRotateSignal(ex)
+                    ? new LiveAttemptOutcome.Rotate()
+                    : new LiveAttemptOutcome.Fail(NetworkError, ex);
                 TearDownSession();
                 return false;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
+                SetupFailure = new LiveAttemptOutcome.Fail(TimedOut, null);
                 TearDownSession();
                 return false;
             }
@@ -256,22 +273,25 @@ internal sealed class LiveSession : IAsyncDisposable
             {
                 ack = await WaitForSetupAckAsync(liveToken, ct);
             }
-            catch (LiveSocketException)
+            catch (LiveSocketException ex)
             {
                 // Receive failure during the ACK gate: same no-proceed outcome.
+                SetupFailure = MapSocketFailure(ex);
                 TearDownSession();
                 return false;
             }
             if (ack is not null)
             {
+                SetupFailure = ack;
                 TearDownSession();
                 return false;
             }
             return true;
         }
-        catch (TransportFallbackException)
+        catch (TransportFallbackException ex)
         {
             // No Live code throws this; mapped defensively, mirroring RunAsync.
+            SetupFailure = new LiveAttemptOutcome.Fail(Failed, ex);
             TearDownSession();
             return false;
         }

@@ -23,6 +23,11 @@ internal static class LiveProtocol
 
     private static readonly Regex HandshakeStatus = new(@"HTTP/\S+\s+(\d{3})", RegexOptions.Compiled);
 
+    // .NET's ClientWebSocket reports handshake rejections as e.g.
+    // "The server returned status code '403' when status code '101' was
+    // expected." — a shape the raw-HTTP regex above never matches.
+    private static readonly Regex DotNetHandshakeStatus = new(@"status code '(\d{3})'", RegexOptions.Compiled);
+
     /// <summary>
     /// Live session setup message. inputAudioTranscription is TOP-LEVEL inside
     /// setup, never inside generationConfig. Model used exactly as passed.
@@ -215,12 +220,34 @@ internal static class LiveProtocol
         var input = statusAndHead ?? "";
         var match = HandshakeStatus.Match(input);
         if (!match.Success)
+            match = DotNetHandshakeStatus.Match(input);
+        if (!match.Success)
+        {
+            if (input.Contains("Rate limited", StringComparison.Ordinal))
+                return ("Rate limited on all keys — retry later", true);
             return ("Network error — check connection", false);
-        var code = match.Groups[1].Value;
-        if (code == "401" || code == "403")
-            return ("Invalid API key — check Settings", false);
-        if (code == "429" || input.Contains("Rate limited", StringComparison.Ordinal))
+        }
+
+        var code = int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        if (code == 429 || input.Contains("Rate limited", StringComparison.Ordinal))
             return ("Rate limited on all keys — retry later", true);
+        return MapHandshakeStatus(code);
+    }
+
+    /// <summary>
+    /// Maps a known HTTP handshake status code (from
+    /// <c>ClientWebSocket.HttpStatusCode</c> via CollectHttpResponseDetails —
+    /// the authoritative source, unlike exception-message parsing) to a fixed
+    /// user-safe message plus whether the caller should rotate keys.
+    /// </summary>
+    internal static (string Message, bool Rotate) MapHandshakeStatus(int code)
+    {
+        if (code == 401 || code == 403)
+            return ("Invalid API key — check Settings", false);
+        if (code == 429)
+            return ("Rate limited on all keys — retry later", true);
+        if (code == 404)
+            return ("Model not available for Live — check Settings", false);
         return ($"Server error (HTTP {code}) — try again", false);
     }
 
