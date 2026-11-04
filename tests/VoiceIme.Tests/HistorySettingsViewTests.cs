@@ -228,7 +228,7 @@ public sealed class HistorySettingsViewTests : IDisposable
             {
                 view.CopyEntry(view.Rows[0].Id);
 
-                Assert.StartsWith("Copy failed:", view.HintMessage, StringComparison.Ordinal);
+                Assert.StartsWith("Couldn't copy:", view.HintMessage, StringComparison.Ordinal);
                 Assert.Equal(MainNav.Glyphs.Copy, view.Rows[0].CopyGlyph);
             },
             onCopy: _ => throw new InvalidOperationException("clipboard busy"));

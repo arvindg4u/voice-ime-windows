@@ -99,7 +99,7 @@ public partial class GeminiSettingsView
         var index = PromptLibrary.IndexOf(_settings.Prompts, target);
         if (index < 0)
         {
-            StatusText.Text = $"Unknown prompt \"{target}\".";
+            SetStatus($"Unknown prompt \"{target}\".", StatusSeverity.Warning);
             RefreshPromptList();
             return false;
         }
@@ -107,7 +107,7 @@ public partial class GeminiSettingsView
         var text = PromptBox.Text.Trim();
         if (PromptLibrary.ValidateText(text) is { } error)
         {
-            StatusText.Text = error;
+            SetStatus(error, StatusSeverity.Error);
             RefreshPromptList();
             return false;
         }
@@ -128,7 +128,7 @@ public partial class GeminiSettingsView
 
         PromptBox.Text = _settings.ActivePromptText;
         PromptNameBox.Text = _settings.ActivePrompt;
-        StatusText.Text = "Saved ✓";
+        SetStatus("Saved.", StatusSeverity.Success);
         RefreshPromptList();
         return true;
     }
@@ -145,14 +145,14 @@ public partial class GeminiSettingsView
         var name = PromptNameBox.Text.Trim();
         if (PromptLibrary.ValidateName(name) is { } nameError)
         {
-            StatusText.Text = nameError;
+            SetStatus(nameError, StatusSeverity.Error);
             return false;
         }
 
         var text = PromptBox.Text.Trim();
         if (PromptLibrary.ValidateText(text) is { } textError)
         {
-            StatusText.Text = textError;
+            SetStatus(textError, StatusSeverity.Error);
             return false;
         }
 
@@ -166,7 +166,7 @@ public partial class GeminiSettingsView
         {
             if (_settings.Prompts.Count >= PromptLibrary.MaxPrompts)
             {
-                StatusText.Text = $"Prompt library is full (max {PromptLibrary.MaxPrompts}).";
+                SetStatus($"Prompt library is full (max {PromptLibrary.MaxPrompts}).", StatusSeverity.Warning);
                 return false;
             }
 
@@ -180,7 +180,7 @@ public partial class GeminiSettingsView
             return false;
         }
 
-        StatusText.Text = "Saved ✓";
+        SetStatus("Saved.", StatusSeverity.Success);
         RefreshPromptList();
         return true;
     }
@@ -197,7 +197,7 @@ public partial class GeminiSettingsView
         var index = PromptLibrary.IndexOf(_settings.Prompts, PromptSelector.SelectedItem as string);
         if (index < 0)
         {
-            StatusText.Text = "Select a prompt to delete.";
+            SetStatus("Select a prompt to delete.", StatusSeverity.Warning);
             return false;
         }
 
@@ -218,7 +218,7 @@ public partial class GeminiSettingsView
 
         PromptBox.Text = _settings.ActivePromptText;
         PromptNameBox.Text = _settings.ActivePrompt;
-        StatusText.Text = "Saved ✓";
+        SetStatus("Saved.", StatusSeverity.Success);
         RefreshPromptList();
         return true;
     }
@@ -231,7 +231,7 @@ public partial class GeminiSettingsView
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Save failed: {ex.Message}";
+            SetStatus($"Couldn't save: {ex.Message}", StatusSeverity.Error);
             return false;
         }
 
