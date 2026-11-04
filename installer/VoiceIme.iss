@@ -16,7 +16,7 @@
 ;   uninstaller leaves them alone.
 
 #define MyAppName "Voice IME"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Voice IME contributors"
 #define MyAppURL "https://github.com/arvindg4u/voice-ime-windows"
 #define MyAppExeName "VoiceIme.exe"

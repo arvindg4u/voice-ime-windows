@@ -10,7 +10,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>VoiceIme</AssemblyName>
     <RootNamespace>VoiceIme</RootNamespace>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <!-- Windows shell identity: EXE icon, DPI/OS manifest, file metadata. -->
     <ApplicationIcon>Assets\voiceime.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
