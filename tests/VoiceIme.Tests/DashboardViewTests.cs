@@ -19,7 +19,9 @@ public sealed class DashboardViewTests
         StaTestHelper.TryRunOnSta(() =>
         {
             var store = new SettingsStore();
-            var clips = new ClipboardStore();
+            // Use an isolated path so we don't pick up leftover entries
+            // from other tests that share %AppData%/VoiceIme/clips.json.
+            var clips = new ClipboardStore(Path.Combine(Path.GetTempPath(), "voice-ime-test-empty-clips.json"));
             var view = new DashboardView(store, clips);
 
             Assert.True(view.IsRecentEmptyVisible);
