@@ -30,8 +30,8 @@ public partial class DashboardView : System.Windows.Controls.UserControl
 
     internal DashboardView(SettingsStore settings, ClipboardStore clips)
     {
-        _settings = ArgumentNullException.ThrowIfNull(settings);
-        _clips = ArgumentNullException.ThrowIfNull(clips);
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _clips = clips ?? throw new ArgumentNullException(nameof(clips));
         InitializeComponent();
         RefreshFromStores();
     }
