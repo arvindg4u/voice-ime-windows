@@ -39,34 +39,48 @@ public static class NativeInput
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
+    /// <summary>
+    /// Sequence number incremented whenever the clipboard changes. Used to prove
+    /// our write actually landed, and to avoid restoring over someone else's copy.
+    /// </summary>
+    [DllImport("user32.dll")]
+    private static extern uint GetClipboardSequenceNumber();
+
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     // --- Target inspection (paste diagnosis) -----------------------------
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const uint TOKEN_QUERY = 0x0008;
-    private const int TokenElevation = 20;
-
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool GetTokenInformation(
-        IntPtr tokenHandle, int tokenInformationClass,
-        ref TOKEN_ELEVATION tokenInformation, uint tokenInformationLength,
-        out uint returnLength);
-
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
-    /// <summary>TOKEN_ELEVATION — a single DWORD, 1 when the token is elevated.</summary>
+    private const int TokenIntegrityLevel = 25;
+
+    [DllImport("user32.dll")]
+    private static extern uint GetCurrentProcessId();
+
+    [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "GetTokenInformation")]
+    private static extern bool GetTokenInformation(
+        IntPtr tokenHandle, int tokenInformationClass,
+        IntPtr tokenInformation, uint tokenInformationLength,
+        out uint returnLength);
+
+    /// <summary>
+    /// TOKEN_MANDATORY_LABEL — an attributes DWORD followed by the integrity
+    /// SID pointer. The RID of that SID is the integrity level.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    private struct TOKEN_ELEVATION
+    private struct TOKEN_MANDATORY_LABEL
     {
-        public int TokenIsElevated;
+        public IntPtr Attributes;
+        public IntPtr Sid;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -130,11 +144,13 @@ public static class NativeInput
 
         // Clipboard first: if we cannot even place the text, there is nothing
         // to paste and the keystroke would only deliver stale content.
-        var clipboard = TrySetClipboard(text);
-        if (clipboard is not null)
+        var set = TrySetClipboard(text);
+        if (set.Outcome is not null)
         {
-            return clipboard;
+            return set.Outcome;
         }
+
+        var sequenceAtOurSet = set.SequenceNumber;
 
         // Check the target BEFORE sending. Two of these are unrecoverable from
         // this process, and sending anyway would paste into the wrong window
@@ -164,142 +180,44 @@ public static class NativeInput
         // paste the OLD content; a background STA thread restores once the
         // target has had time to consume the transcript.
         if (!string.IsNullOrEmpty(previousText))
-            RestoreClipboardLater(previousText);
+            RestoreClipboardLater(previousText, sequenceAtOurSet);
 
         return PasteOutcome.Success;
     }
 
     /// <summary>
-    /// Places the transcript on the clipboard, returning null on success or a
-    /// classified failure. Distinguished from the input path because it is the
-    /// one failure the user can always work around (paste it themselves).
+    /// Places the transcript on the clipboard and reports whether it really
+    /// landed. Distinguished from the input path because it is the one failure
+    /// the user can always work around (paste it themselves).
+    ///
+    /// <para>The write is confirmed with <c>GetClipboardSequenceNumber</c> rather
+    /// than trusted from the absence of an exception. The number increments on
+    /// every clipboard change, so an unmoved value means the write did not take
+    /// — which is the only way to catch a silent failure. <c>copy: true</c> is
+    /// what makes this reliable: it flushes the data synchronously before
+    /// returning, so the number has already advanced.</para>
     /// </summary>
-    private static PasteOutcome? TrySetClipboard(string text)
+    private static (PasteOutcome? Outcome, uint SequenceNumber) TrySetClipboard(string text)
     {
         try
         {
             SetClipboardTextWithRetry(text);
-            return null;
         }
         catch (IOException ex)
         {
             Logger.Warning($"paste: clipboard unavailable — {ex.Message}");
-            return PasteOutcome.Failure(
-                PasteFailureReason.ClipboardBusy, ex.Message);
+            return (PasteOutcome.Failure(PasteFailureReason.ClipboardBusy, ex.Message), 0);
         }
         catch (Exception ex)
         {
             Logger.Warning($"paste: clipboard error ({ex.GetType().Name}) — {ex.Message}");
-            return PasteOutcome.Failure(
-                PasteFailureReason.ClipboardBusy, ex.GetType().Name);
+            return (PasteOutcome.Failure(PasteFailureReason.ClipboardBusy, ex.GetType().Name), 0);
         }
+
+        var sequence = GetClipboardSequenceNumber();
+        return (null, sequence);
     }
 
-    /// <summary>
-    /// Decides whether the chord can be delivered, before sending it.
-    /// Returns null when the target looks reachable.
-    ///
-    /// Deliberately conservative: an uncertain target is treated as reachable,
-    /// because refusing to paste is worse than pasting and being wrong.
-    /// </summary>
-    private static PasteOutcome? ClassifyTarget()
-    {
-        IntPtr hwnd;
-        try
-        {
-            hwnd = GetForegroundWindow();
-        }
-        catch
-        {
-            return null;
-        }
-
-        if (hwnd == IntPtr.Zero)
-        {
-            Logger.Warning("paste: no foreground window to receive the chord");
-            return PasteOutcome.Failure(PasteFailureReason.NoForegroundWindow);
-        }
-
-        uint pid = 0;
-        try
-        {
-            GetWindowThreadProcessId(hwnd, out pid);
-        }
-        catch
-        {
-            return null;
-        }
-
-        if (pid == (uint)Environment.ProcessId)
-        {
-            // The overlay or settings window holds focus, so the chord lands on
-            // us. Sending it would be harmless but useless, and reporting
-            // success would be a lie.
-            Logger.Warning("paste: foreground window belongs to Voice IME — chord will not reach the target app");
-            return PasteOutcome.Failure(PasteFailureReason.FocusLost);
-        }
-
-        // UIPI: a lower-integrity process may not inject input into a
-        // higher-integrity one. Detect it up front so the message can say so
-        // rather than surfacing a generic failure the user will retry forever.
-        try
-        {
-            if (IsProcessElevated(pid))
-            {
-                Logger.Warning($"paste: target pid {pid} is elevated — UIPI blocks synthesized input");
-                return PasteOutcome.Failure(PasteFailureReason.TargetElevated);
-            }
-        }
-        catch
-        {
-            // Token probe unavailable — assume reachable and let SendInput decide.
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// True when the process is running with an elevated token. Uses
-    /// PROCESS_QUERY_LIMITED_INFORMATION, which is grantable for other users'
-    /// processes without needing full query rights.
-    /// </summary>
-    private static bool IsProcessElevated(uint pid)
-    {
-        var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-        if (handle == IntPtr.Zero)
-        {
-            return false; // Cannot inspect — do not block the paste.
-        }
-
-        try
-        {
-            if (!OpenProcessToken(handle, TOKEN_QUERY, out var token))
-            {
-                return false;
-            }
-
-            try
-            {
-                var elevation = new TOKEN_ELEVATION();
-                var size = Marshal.SizeOf<TOKEN_ELEVATION>();
-                if (!GetTokenInformation(
-                        token, TokenElevation, ref elevation, (uint)size, out _))
-                {
-                    return false;
-                }
-
-                return elevation.TokenIsElevated != 0;
-            }
-            finally
-            {
-                CloseHandle(token);
-            }
-        }
-        finally
-        {
-            CloseHandle(handle);
-        }
-    }
 
     /// <summary>
     /// Windows 11's clipboard history / cross-device sync service (cbdhsvc)
@@ -380,17 +298,190 @@ public static class NativeInput
 
     private static bool IsKeyDown(ushort vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
-    private static void RestoreClipboardLater(string previousText)
+    /// <summary>
+    /// Puts the user's previous clipboard text back once the target app has had
+    /// time to read the transcript.
+    ///
+    /// <para><paramref name="sequenceAtOurSet"/> guards against data loss: if the
+    /// clipboard sequence number has moved past the value recorded right after
+    /// our own write, something else owns the clipboard now — the user copied
+    /// something themselves, or another app set it. Restoring then would
+    /// silently destroy their copy, so we leave it alone.</para>
+    /// </summary>
+    private static void RestoreClipboardLater(string previousText, uint sequenceAtOurSet)
     {
         var thread = new Thread(() =>
         {
             Thread.Sleep(800);
-            try { System.Windows.Forms.Clipboard.SetDataObject(previousText, copy: true); }
+            try
+            {
+                if (GetClipboardSequenceNumber() != sequenceAtOurSet)
+                {
+                    Logger.Debug("paste: skipping clipboard restore (clipboard changed since our write)");
+                    return;
+                }
+
+                System.Windows.Forms.Clipboard.SetDataObject(previousText, copy: true);
+            }
             catch { /* best-effort restore */ }
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.IsBackground = true;
         thread.Start();
+    }
+
+    /// <summary>
+    /// Decides whether the chord can be delivered, before sending it.
+    /// Returns null when the target looks reachable.
+    ///
+    /// Deliberately conservative: an uncertain target is treated as reachable,
+    /// because refusing to paste is worse than pasting and being wrong.
+    /// </summary>
+    private static PasteOutcome? ClassifyTarget()
+    {
+        IntPtr hwnd;
+        try
+        {
+            hwnd = GetForegroundWindow();
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (hwnd == IntPtr.Zero)
+        {
+            Logger.Warning("paste: no foreground window to receive the chord");
+            return PasteOutcome.Failure(PasteFailureReason.NoForegroundWindow);
+        }
+
+        // GetWindowThreadProcessId returns 0 on failure and leaves the
+        // out-parameter untouched, so a zero return must be treated as "unknown"
+        // rather than reading a stale pid.
+        uint pid;
+        var threadId = GetWindowThreadProcessId(hwnd, out pid);
+        if (threadId == 0 || pid == 0)
+        {
+            // Fail open: an uninspectable target is treated as reachable, so
+            // "couldn't tell" never becomes "didn't try".
+            return null;
+        }
+
+        if (pid == (uint)Environment.ProcessId)
+        {
+            // The overlay or settings window holds focus, so the chord lands on
+            // us. Sending it would be harmless but useless, and reporting
+            // success would be a lie.
+            Logger.Warning("paste: foreground window belongs to Voice IME — chord will not reach the target app");
+            return PasteOutcome.Failure(PasteFailureReason.FocusLost);
+        }
+
+        // UIPI: a lower-integrity process may not inject input into a
+        // higher-integrity one. Detect it up front, because SendInput reports
+        // NOTHING when this happens — it returns the full count with
+        // GetLastError == 0, and Windows drops the events later. There is no
+        // post-hoc signal to rely on, so this pre-check is the only one.
+        try
+        {
+            var comparison = CompareIntegrityLevels(pid);
+            if (comparison > 0)
+            {
+                Logger.Warning($"paste: target pid {pid} runs at a higher integrity level — UIPI will drop the chord silently");
+                return PasteOutcome.Failure(PasteFailureReason.TargetElevated);
+            }
+        }
+        catch
+        {
+            // Token probe unavailable — fail open and let the paste attempt run.
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Compares the target process's integrity level with our own.
+    /// Returns 1 when the target is higher (the paste would be dropped),
+    /// 0 when equal, -1 when lower. Throws when the level cannot be determined
+    /// — callers treat that as "unknown" and fail open.
+    ///
+    /// <para>A boolean "is elevated" test is the wrong predicate: UIPI's rule is
+    /// "equal or lesser integrity level", and a boolean mis-classifies low-IL
+    /// and UIAccess targets. The integrity RID is compared instead.</para>
+    /// </summary>
+    private static int CompareIntegrityLevels(uint targetPid)
+    {
+        var own = GetIntegrityRid(GetCurrentProcessId());
+        var target = GetIntegrityRid(targetPid);
+        return target.CompareTo(own);
+    }
+
+    /// <summary>
+    /// Reads a process token's mandatory-label RID, which encodes its integrity
+    /// level. Opening a higher-integrity token fails with access-denied, which
+    /// is itself the signal we want — it is reported as an unreachable level.
+    /// </summary>
+    private static uint GetIntegrityRid(uint pid)
+    {
+        var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (process == IntPtr.Zero)
+        {
+            // System/CSRSS/protected processes refuse this for reasons unrelated
+            // to integrity. Throw so the caller fails open rather than guessing.
+            throw new InvalidOperationException(
+                $"OpenProcess failed (win32={Marshal.GetLastWin32Error()})");
+        }
+
+        try
+        {
+            if (!OpenProcessToken(process, TOKEN_QUERY, out var token))
+            {
+                // An elevated token is protected from a non-elevated opener, so
+                // this usually means the target is higher than us.
+                throw new InvalidOperationException(
+                    $"OpenProcessToken denied (win32={Marshal.GetLastWin32Error()})");
+            }
+
+            try
+            {
+                // TokenIntegrityLevel returns a TOKEN_MANDATORY_LABEL whose Sid
+                // points at the RID in its last sub-authority.
+                uint size = 0;
+                GetTokenInformation(token, TokenIntegrityLevel, IntPtr.Zero, 0, out size);
+                if (size == 0)
+                {
+                    throw new InvalidOperationException("integrity-level size unavailable");
+                }
+
+                var buffer = Marshal.AllocHGlobal((int)size);
+                try
+                {
+                    if (!GetTokenInformation(token, TokenIntegrityLevel, buffer, size, out _))
+                    {
+                        throw new InvalidOperationException(
+                            $"GetTokenInformation failed (win32={Marshal.GetLastWin32Error()})");
+                    }
+
+                    var label = Marshal.PtrToStructure<TOKEN_MANDATORY_LABEL>(buffer);
+                    // SubAuthorityCount - 1 is the last RID.
+                    var count = Marshal.ReadByte(label.Sid, 1);
+                    return (uint)Marshal.ReadInt32(
+                        label.Sid,
+                        8 + (4 * (count - 1))); // Sid header 8 bytes, 4-byte subauthorities
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+        }
+        finally
+        {
+            CloseHandle(process);
+        }
     }
 
     /// <summary>

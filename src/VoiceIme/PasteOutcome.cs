@@ -129,14 +129,17 @@ public static class PasteDiagnosis
     };
 
     /// <summary>
-    /// Classifies a failed <c>SendInput</c> by its Win32 error code.
-    /// <c>ERROR_ACCESS_DENIED</c> (5) is the documented UIPI rejection.
+    /// Classifies a short <c>SendInput</c> by its Win32 error code.
+    ///
+    /// <para>Note there is deliberately no ERROR_ACCESS_DENIED → elevated
+    /// mapping. UIPI does <em>not</em> surface through SendInput: the call
+    /// reports the full count with <c>GetLastError</c> == 0 and the events are
+    /// dropped later, silently (documented on the SendInput reference page).
+    /// Elevation is therefore detected in advance by comparing integrity
+    /// levels, never from this error.</para>
     /// </summary>
-    public static PasteFailureReason FromSendInputError(int win32Error) => win32Error switch
-    {
-        5 => PasteFailureReason.TargetElevated,   // ERROR_ACCESS_DENIED — UIPI
-        _ => PasteFailureReason.InputRejected,
-    };
+    public static PasteFailureReason FromSendInputError(int win32Error) =>
+        PasteFailureReason.InputRejected;
 }
 
 /// <summary>

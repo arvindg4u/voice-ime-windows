@@ -76,14 +76,18 @@ public sealed class PasteDiagnosisTests
         }
     }
 
+    // UIPI never surfaces through SendInput — the call reports full success and
+    // GetLastError stays 0 while the events are dropped. So no error code may
+    // be classified as elevated; elevation comes from the integrity-level check.
     [Theory]
-    [InlineData(5, PasteFailureReason.TargetElevated)]   // ERROR_ACCESS_DENIED = UIPI
-    [InlineData(87, PasteFailureReason.InputRejected)]   // ERROR_INVALID_PARAMETER
-    [InlineData(0, PasteFailureReason.InputRejected)]
-    public void FromSendInputError_ClassifiesAccessDeniedAsElevation(
-        int win32Error, PasteFailureReason expected)
+    [InlineData(5)]    // ERROR_ACCESS_DENIED (would be UIPI on SendMessage, not here)
+    [InlineData(87)]   // ERROR_INVALID_PARAMETER
+    [InlineData(0)]
+    public void FromSendInputError_NeverClassifiesElevation(int win32Error)
     {
-        Assert.Equal(expected, PasteDiagnosis.FromSendInputError(win32Error));
+        Assert.Equal(
+            PasteFailureReason.InputRejected,
+            PasteDiagnosis.FromSendInputError(win32Error));
     }
 
     [Fact]
