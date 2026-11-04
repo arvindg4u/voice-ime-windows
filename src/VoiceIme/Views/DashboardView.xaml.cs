@@ -75,7 +75,7 @@ public partial class DashboardView : System.Windows.Controls.UserControl
 
     private void SectionTile_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && SectionFromTag(button.Tag) is { } section)
+        if (sender is System.Windows.Controls.Button button && SectionFromTag(button.Tag) is { } section)
         {
             NavigateTo(section);
         }
@@ -91,7 +91,7 @@ public partial class DashboardView : System.Windows.Controls.UserControl
 
         try
         {
-            Clipboard.SetText(latest.Text);
+            System.Windows.Clipboard.SetText(latest.Text);
         }
         catch
         {

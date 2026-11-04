@@ -304,7 +304,7 @@ public partial class MainWindow : Window
                 {
                     Height = 1,
                     BorderThickness = new Thickness(0, 1, 0, 0),
-                    BorderBrush = (Brush)FindResource("HandyDivider"),
+                    BorderBrush = (System.Windows.Media.Brush)FindResource("HandyDivider"),
                     Margin = new Thickness(16, 8, 16, 4),
                 });
             }
