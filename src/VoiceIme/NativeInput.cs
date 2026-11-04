@@ -163,12 +163,14 @@ public static class NativeInput
             return target;
         }
 
-        NeutralizeHeldModifiers();
+        var releases = NeutralizeHeldModifiers();
 
         // Give the clipboard a beat to settle before the keystroke lands.
         Thread.Sleep(50);
 
-        var sent = SendChord(PasteChords.ForMethod(method));
+        // Releases ride along in the same array as the chord — see
+        // NeutralizeHeldModifiers for why they must not be a separate call.
+        var sent = SendChord(PasteChords.ForMethod(method), releases);
         if (!sent.Delivered)
         {
             return sent;
@@ -255,26 +257,58 @@ public static class NativeInput
     /// release, then force key-ups for any stragglers (the user's eventual
     /// physical release is a harmless no-op afterwards).
     /// </summary>
-    private static void NeutralizeHeldModifiers()
+    /// <summary>
+    /// Returns key-up events for any physically held modifiers, after briefly
+    /// waiting for the user to release them.
+    ///
+    /// <para>The releases are *returned* rather than sent because they must
+    /// travel in the same <c>SendInput</c> array as the chord. Sending them in a
+    /// separate call lets the modifier messages slip back into the queue and
+    /// re-press the modifier, which defeats the purpose.</para>
+    ///
+    /// <para>A Win-key release is wrapped with an intervening Ctrl down/up.
+    /// Windows opens the Start menu on a Win press with no intervening key
+    /// event, so a bare Win-up could pop Start over the user's work.</para>
+    /// </summary>
+    private static List<INPUT> NeutralizeHeldModifiers()
     {
         const int waitBudgetMs = 400;
         var deadline = Environment.TickCount64 + waitBudgetMs;
         while (AnyModifierDown() && Environment.TickCount64 < deadline)
             Thread.Sleep(15);
 
-        var ups = new List<INPUT>();
+        var releases = new List<INPUT>();
         foreach (var vk in PhysicalModifierVks)
         {
-            if (IsKeyDown(vk))
-                ups.Add(KeyUp(vk));
+            if (!IsKeyDown(vk))
+            {
+                continue;
+            }
+
+            if (vk is VK_LWIN or VK_RWIN)
+            {
+                // Guard the Start-menu side effect.
+                releases.Add(KeyDown(VK_CONTROL));
+                releases.Add(KeyUp(vk));
+                releases.Add(KeyUp(VK_CONTROL));
+            }
+            else
+            {
+                releases.Add(KeyUp(vk));
+            }
         }
 
-        if (ups.Count == 0)
-            return;
-        Logger.Debug($"paste: releasing {ups.Count} still-held modifier(s) before the chord");
-        SendInput((uint)ups.Count, ups.ToArray(), Marshal.SizeOf<INPUT>()); // best-effort
-        Thread.Sleep(15); // let the key state settle before the chord
+        if (releases.Count > 0)
+        {
+            Logger.Debug($"paste: queued {releases.Count} modifier release event(s) for the chord");
+        }
+
+        return releases;
     }
+
+    private const ushort VK_CONTROL = 0x11;
+    private const ushort VK_LWIN = 0x5B;
+    private const ushort VK_RWIN = 0x5C;
 
     // Left/right-specific VKs: the specific key must be released, releasing
     // generic VK_CONTROL does not clear a held VK_RCONTROL.
@@ -521,9 +555,10 @@ public static class NativeInput
         return SendOrClassify(inputs);
     }
 
-    private static PasteOutcome SendChord(PasteChord chord)
+    private static PasteOutcome SendChord(PasteChord chord, List<INPUT> preEvents)
     {
-        var inputs = new List<INPUT>(chord.Modifiers.Length * 2 + 2);
+        var inputs = new List<INPUT>(preEvents.Count + chord.Modifiers.Length * 2 + 2);
+        inputs.AddRange(preEvents);
         foreach (var modifier in chord.Modifiers)
         {
             inputs.Add(KeyDown(modifier));
