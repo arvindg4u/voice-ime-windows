@@ -51,16 +51,20 @@ public sealed class PasteDiagnosisTests
     }
 
     [Fact]
-    public void Messages_DoNotBlameTheUserOrLeakCodes()
+    public void Messages_DoNotLeakCodesOrBlameTheUser()
     {
         foreach (var reason in AllReasons)
         {
             var message = PasteDiagnosis.MessageFor(reason);
 
-            Assert.DoesNotContain("you ", message, StringComparison.OrdinalIgnoreCase);
+            // Microsoft's writing guidance: no error codes, no jargon, and do
+            // not blame the user. It also says to address the user as "you",
+            // so second person is explicitly allowed — "your app", "your
+            // clipboard". What is forbidden is fault framing.
+            Assert.DoesNotMatch(@"\b0x[0-9A-Fa-f]+|\bwin32\b|\bHRESULT\b|\bexception\b", message);
             Assert.DoesNotContain("failed to", message, StringComparison.OrdinalIgnoreCase);
-            // No numeric error codes in user-facing copy.
-            Assert.DoesNotMatch(@"\b0x[0-9A-Fa-f]+|\bwin32\b|\berror\b", message);
+            Assert.DoesNotContain("invalid", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("you did", message, StringComparison.OrdinalIgnoreCase);
         }
     }
 

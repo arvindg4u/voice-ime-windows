@@ -386,7 +386,9 @@ public static class NativeInput
             var comparison = CompareIntegrityLevels(pid);
             if (comparison > 0)
             {
-                Logger.Warning($"paste: target pid {pid} runs at a higher integrity level — UIPI will drop the chord silently");
+                Logger.Warning(
+                    $"paste: target pid {pid} has a higher integrity level than Voice IME "
+                    + "(own rid {OwnIntegrityRid()}) — UIPI drops the chord silently");
                 return PasteOutcome.Failure(PasteFailureReason.TargetElevated);
             }
         }
@@ -410,10 +412,34 @@ public static class NativeInput
     /// </summary>
     private static int CompareIntegrityLevels(uint targetPid)
     {
-        var own = GetIntegrityRid(GetCurrentProcessId());
+        var own = OwnIntegrityRid();
         var target = GetIntegrityRid(targetPid);
         return target.CompareTo(own);
     }
+
+    /// <summary>
+    /// Our own integrity RID, cached.
+    ///
+    /// <para>Caching matters for correctness, not just speed: the comparison
+    /// must be relative. An earlier version asked only "is the target
+    /// elevated?", which meant that running Voice IME *as administrator* — the
+    /// very workaround the error message suggests — made it refuse to paste
+    /// into any elevated app, even though equal-integrity injection is
+    /// permitted and works.</para>
+    /// </summary>
+    private static uint OwnIntegrityRid()
+    {
+        if (_ownIntegrityRid is uint cached)
+        {
+            return cached;
+        }
+
+        var rid = GetIntegrityRid(GetCurrentProcessId());
+        _ownIntegrityRid = rid;
+        return rid;
+    }
+
+    private static uint? _ownIntegrityRid;
 
     /// <summary>
     /// Reads a process token's mandatory-label RID, which encodes its integrity

@@ -718,7 +718,11 @@ public partial class App : System.Windows.Application
             DisarmCancelHotkey();
             RefreshMenu();
             _overlay?.Hide();
-            SetTray("Voice IME — pasted ✓");
+            // Deliberately not "pasted ✓": SendInput returning the full count
+            // proves only that the events entered the input stream, not that
+            // the target consumed them. Windows drops blocked input silently,
+            // so an unqualified success claim would sometimes be false.
+            SetTray("Voice IME — sent to your app");
             SoundFeedback.PlayPostPasteTone(_settings);
         }
     }

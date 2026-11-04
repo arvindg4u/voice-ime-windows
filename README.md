@@ -335,17 +335,23 @@ reason are logged there verbatim for diagnosis.
 <details>
 <summary><strong>Paste doesn't land in the app</strong></summary>
 
-Click the text field first, then dictate. If the target runs as Administrator
-(e.g. elevated Task Manager), relaunch Voice IME as admin — or copy from
-History. Windows blocks keystroke injection into elevated windows (UIPI);
-when that happens the log shows `paste: SendInput … win32=5`.
+Click the text field first, then dictate. Windows will not let an app send
+keystrokes to a window running at a higher privilege level than itself
+(UIPI). If the target runs as Administrator, either relaunch Voice IME as
+administrator too, or copy the transcript from History. The toast names the
+reason because this failure is silent at the API level: Windows reports the
+keystroke as sent and then drops it, so there is no error code to quote.
 
 Voice IME waits briefly for you to lift the hotkey keys before sending the
 paste chord (held modifiers would turn Ctrl+V into e.g. Ctrl+Alt+V), retries
 around Windows 11's clipboard-history service when the clipboard is busy,
-and restores your previous clipboard text about a second after the paste.
-Every delivery failure keeps the transcript in History and writes a
-`paste:` diagnostic line to `%AppData%\VoiceIme\logs\voiceime.log`.
+and restores your previous clipboard text about a second after the paste —
+unless you copied something else in the meantime, in which case your copy is
+left alone.
+
+Every delivery failure keeps the transcript in History, leaves it on the
+clipboard so you can paste it yourself, and writes a `paste:` diagnostic line
+to `%AppData%\VoiceIme\logs\voiceime.log` recording the classified reason.
 </details>
 
 <details>
