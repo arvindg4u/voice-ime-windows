@@ -136,7 +136,7 @@
         </Grid>
 
         <!-- ==================== LIST ==================== -->
-        <ListBox x:Name="EntriesList" Style="{StaticResource HistoryList}"
+        <ListBox x:Name="EntriesList" Style="{DynamicResource HistoryList}"
                  AutomationProperties.Name="Transcript history">
             <ListBox.ItemTemplate>
                 <DataTemplate>

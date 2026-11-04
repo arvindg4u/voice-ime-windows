@@ -99,7 +99,7 @@ public sealed class GeminiSettingsViewTests
             Assert.True(store.ApiKeys.SequenceEqual(["key-1", "key-2"]));
             Assert.Equal("test-model", store.Model);
             Assert.Equal("polish it", store.CustomPrompt);
-            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Saved.", view.StatusMessage);
             Assert.Single(saved);
         }, saver: saved.Add);
     }
@@ -111,7 +111,7 @@ public sealed class GeminiSettingsViewTests
         {
             view.TestNowAsync().GetAwaiter().GetResult();
 
-            Assert.StartsWith("Test OK — transcript:", view.StatusMessage, StringComparison.Ordinal);
+            Assert.StartsWith("Connection works. Heard:", view.StatusMessage, StringComparison.Ordinal);
             Assert.Contains("hello", view.StatusMessage, StringComparison.Ordinal);
         }, transcribeAsync: (_, _, _, _, _, _) => Task.FromResult(("hello", 0)));
     }
@@ -206,7 +206,7 @@ public sealed class GeminiSettingsViewTests
             Assert.Equal("Work", store.ActivePrompt);
             Assert.Equal("polish it", store.ActivePromptText);
             Assert.Equal("polish it", store.CustomPrompt);
-            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Saved.", view.StatusMessage);
             Assert.Equal("Work", view.SelectedPromptName);
             Assert.Single(saved);
         }, saver: saved.Add);
@@ -235,7 +235,7 @@ public sealed class GeminiSettingsViewTests
                 [new PromptEntry("Work", "new text"), new PromptEntry("Mail", "short")]));
             Assert.Equal("Work", store.ActivePrompt);
             Assert.Equal("new text", store.CustomPrompt);
-            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Saved.", view.StatusMessage);
             Assert.Single(saved);
         }, saver: saved.Add);
     }
@@ -368,7 +368,7 @@ public sealed class GeminiSettingsViewTests
             Assert.Equal("short", view.PromptText);
             Assert.Equal("Mail", view.PromptName);
             Assert.Equal("Mail", view.SelectedPromptName);
-            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Saved.", view.StatusMessage);
             Assert.Single(saved);
         }, saver: saved.Add);
     }
@@ -435,7 +435,7 @@ public sealed class GeminiSettingsViewTests
             Assert.Equal("w", store.CustomPrompt);
             Assert.Equal("w", view.PromptText);
             Assert.Equal("Work", view.SelectedPromptName);
-            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Saved.", view.StatusMessage);
             Assert.Single(saved);
         }, saver: saved.Add);
     }
@@ -515,7 +515,7 @@ public sealed class GeminiSettingsViewTests
             Assert.True(ok);
             Assert.True(store.Prompts.SequenceEqual([new PromptEntry("Work", "edited")]));
             Assert.Equal("edited", store.CustomPrompt);
-            Assert.Equal("Saved ✓", view.StatusMessage);
+            Assert.Equal("Saved.", view.StatusMessage);
             Assert.Single(saved);
         }, saver: saved.Add);
     }
@@ -539,7 +539,7 @@ public sealed class GeminiSettingsViewTests
         {
             view.TestNowAsync().GetAwaiter().GetResult();
 
-            Assert.StartsWith("Test OK — transcript:", view.StatusMessage, StringComparison.Ordinal);
+            Assert.StartsWith("Connection works. Heard:", view.StatusMessage, StringComparison.Ordinal);
             Assert.Equal("active text", sentPrompt);
         }, transcribeAsync: (_, _, _, _, prompt, _) =>
         {

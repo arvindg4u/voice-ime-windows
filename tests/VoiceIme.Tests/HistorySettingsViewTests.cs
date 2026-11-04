@@ -99,10 +99,10 @@ public sealed class HistorySettingsViewTests : IDisposable
             {
                 Assert.Equal(2, view.Rows.Count);
                 Assert.Equal("newer", view.Rows[0].Body);
-                Assert.Equal("★", view.Rows[0].PinGlyph);
+                Assert.Equal(MainNav.Glyphs.Unpin, view.Rows[0].PinGlyph);
                 Assert.Equal("Unpin", view.Rows[0].PinTip);
                 Assert.Equal("older", view.Rows[1].Body);
-                Assert.Equal("☆", view.Rows[1].PinGlyph);
+                Assert.Equal(MainNav.Glyphs.Pin, view.Rows[1].PinGlyph);
                 Assert.False(view.IsEmptyVisible);
             });
     }
@@ -117,7 +117,7 @@ public sealed class HistorySettingsViewTests : IDisposable
                 view.CopyEntry(view.Rows[0].Id);
 
                 Assert.Equal("say this", copied);
-                Assert.Equal("✓", view.Rows[0].CopyGlyph);
+                Assert.Equal(MainNav.Glyphs.Success, view.Rows[0].CopyGlyph);
                 Assert.Equal("Copied to clipboard.", view.HintMessage);
             },
             onCopy: text => copied = text);
@@ -132,7 +132,7 @@ public sealed class HistorySettingsViewTests : IDisposable
 
             view.TogglePinEntry(id);
 
-            Assert.Equal("★", view.Rows[0].PinGlyph);
+            Assert.Equal(MainNav.Glyphs.Unpin, view.Rows[0].PinGlyph);
             Assert.Equal("Unpin", view.Rows[0].PinTip);
         });
     }
@@ -187,8 +187,8 @@ public sealed class HistorySettingsViewTests : IDisposable
             var row = Assert.Single(view.Rows);
             Assert.Equal(string.Empty, row.Body);
             Assert.Equal("quota exhausted", row.Error);
-            Assert.Equal("⧉", row.CopyGlyph);
-            Assert.Equal("☆", row.PinGlyph);
+            Assert.Equal(MainNav.Glyphs.Copy, row.CopyGlyph);
+            Assert.Equal(MainNav.Glyphs.Pin, row.PinGlyph);
         });
     }
 
@@ -205,13 +205,15 @@ public sealed class HistorySettingsViewTests : IDisposable
     }
 
     [Fact]
-    public void Rows_FailedRow_HasMutedOpacityAndInlineError()
+    public void Rows_FailedRow_FullOpacityWithInlineError()
     {
         TryRunOnSta(PathFor("opacity-failed.json"), store => store.Add(string.Empty), view =>
         {
             view.AttachError(view.Rows[0].Id, "quota exhausted");
 
             var row = Assert.Single(view.Rows);
+            // Failed rows are marked (chip + icon), never dimmed — dimming
+            // pushed already-muted text below the contrast floor.
             Assert.Equal(1.0, row.CardOpacity);
             Assert.Equal("quota exhausted", row.Error);
             Assert.Equal(string.Empty, row.Body);
@@ -227,7 +229,7 @@ public sealed class HistorySettingsViewTests : IDisposable
                 view.CopyEntry(view.Rows[0].Id);
 
                 Assert.StartsWith("Copy failed:", view.HintMessage, StringComparison.Ordinal);
-                Assert.Equal("⧉", view.Rows[0].CopyGlyph);
+                Assert.Equal(MainNav.Glyphs.Copy, view.Rows[0].CopyGlyph);
             },
             onCopy: _ => throw new InvalidOperationException("clipboard busy"));
     }
