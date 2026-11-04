@@ -90,10 +90,44 @@ public static class NativeInput
         public InputUnion U;
     }
 
+    /// <summary>
+    /// The <c>INPUT</c> union. All three members must be declared even though
+    /// this app only ever sends keyboard events: the union's size is that of
+    /// its LARGEST member, and <c>SendInput</c> rejects the whole call unless
+    /// <c>cbSize</c> is exactly <c>sizeof(INPUT)</c>.
+    ///
+    /// <para>Declaring only <c>KEYBDINPUT</c> made the struct 32 bytes on x64
+    /// instead of 40, because MOUSEINPUT is the widest member (32 bytes). Every
+    /// SendInput call then failed with ERROR_INVALID_PARAMETER — which is why
+    /// no app ever received a paste.</para>
+    /// </summary>
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
+        [FieldOffset(0)] public MOUSEINPUT mi;
         [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    /// <summary>Widest union member — present only so the union is sized correctly.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    /// <summary>Union member — present only so the union is sized correctly.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -105,6 +139,16 @@ public static class NativeInput
         public uint time;
         public IntPtr dwExtraInfo;
     }
+
+    /// <summary>
+    /// The cbSize SendInput requires. Exposed for a regression test — a wrong
+    /// value fails every call and is otherwise invisible (SendInput just
+    /// returns 0, and nothing reaches any application).
+    /// </summary>
+    internal static int InputStructSize => Marshal.SizeOf<INPUT>();
+
+    /// <summary>sizeof(INPUT) as the OS defines it, for the current pointer width.</summary>
+    internal static int ExpectedInputStructSize => IntPtr.Size == 8 ? 40 : 28;
 
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -580,7 +624,16 @@ public static class NativeInput
     /// </summary>
     private static PasteOutcome SendOrClassify(INPUT[] inputs)
     {
-        var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        // A cbSize mismatch makes SendInput fail for every target identically,
+        // so log it as a programming error rather than a user-facing one.
+        if (InputStructSize != ExpectedInputStructSize)
+        {
+            Logger.Error(
+                $"paste: BUG — INPUT marshals to {InputStructSize} bytes, "
+                + $"expected {ExpectedInputStructSize}; SendInput will reject every call");
+        }
+
+        var sent = SendInput((uint)inputs.Length, inputs, InputStructSize);
         if (sent == inputs.Length)
         {
             return PasteOutcome.Success;
