@@ -3,14 +3,18 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+// UseWindowsForms puts System.Drawing and System.Windows.Forms on the
+// implicit-using list, so these three names are ambiguous. Pin the WPF ones.
+using Application = System.Windows.Application;
 using Color = System.Windows.Media.Color;
+using SystemColors = System.Windows.SystemColors;
 
 namespace VoiceIme.Theme;
 
 /// <summary>
-/// Concrete Handy UI theme. There is no "system" value here — see
+/// Concrete app theme. There is no "system" member — see
 /// <see cref="ThemeManager.ResolveTheme"/> which maps a stored preference
-/// ("system"|"light"|"dark") to one of these, following the OS for "system".
+/// ("system"|"light"|"dark") onto one of these, following the OS for "system".
 /// </summary>
 public enum HandyTheme
 {
@@ -19,11 +23,25 @@ public enum HandyTheme
 }
 
 /// <summary>
-/// Maps a stored theme preference to the concrete theme and swaps the
-/// HandyTheme.xaml brushes at runtime (all consumers use DynamicResource,
-/// so they update live). The mapping is a pure function of (preference, OS
-/// setting) via the injectable <c>SystemDarkModeProvider</c>, so it is
-/// unit-testable without touching the registry or a running WPF app.
+/// Applies a <see cref="Palette"/> to the running application.
+///
+/// <para><b>Mechanism.</b> The theme is applied by swapping a
+/// <see cref="ResourceDictionary"/> in and out of
+/// <c>Application.Resources.MergedDictionaries</c> rather than by mutating
+/// individual entries. Merged-dictionary order decides precedence (the last
+/// dictionary wins), so the active theme is appended last. Every consumer uses
+/// <c>DynamicResource</c>, so they all re-resolve on the swap.</para>
+///
+/// <para><b>High contrast.</b> When a Windows contrast theme is active the
+/// palette is replaced entirely by <see cref="SystemColors"/> — an app must
+/// yield to the OS palette rather than paint its own colours, otherwise the
+/// contrast theme is silently ignored. High contrast is a single variant: it
+/// does not have light/dark flavours.</para>
+///
+/// <para><b>Testability.</b> The mapping from preference to theme, and from
+/// environment to palette, are pure functions of injectable providers, so the
+/// logic is unit-testable without a registry, a window station, or a running
+/// WPF application.</para>
 /// </summary>
 public static class ThemeManager
 {
@@ -31,41 +49,12 @@ public static class ThemeManager
     public const string LightPreference = "light";
     public const string DarkPreference = "dark";
 
-    // Accent, mid-gray, borders and secondary fills are theme-invariant;
-    // they are listed in both palettes so ApplyTheme always sets every key.
-    private static readonly IReadOnlyDictionary<string, Color> LightPalette =
-        new Dictionary<string, Color>
-        {
-            ["HandyText"] = Color.FromRgb(0x0F, 0x0F, 0x0F),
-            ["HandyBackground"] = Color.FromRgb(0xFB, 0xFB, 0xFB),
-            ["HandyAccent"] = Color.FromRgb(0xDA, 0x58, 0x93),
-            ["HandyLogoPrimary"] = Color.FromRgb(0xFA, 0xA2, 0xCA),
-            ["HandyError"] = Color.FromRgb(0xDC, 0x26, 0x26),
-            ["HandyWarning"] = Color.FromRgb(0xD9, 0x77, 0x06),
-            ["HandyMidGray"] = Color.FromRgb(0x80, 0x80, 0x80),
-            ["HandyCardBorder"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
-            ["HandyCardBackground"] = Color.FromRgb(0xFF, 0xFF, 0xFF),
-            ["HandySecondaryBackground"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
-        };
-
-    private static readonly IReadOnlyDictionary<string, Color> DarkPalette =
-        new Dictionary<string, Color>
-        {
-            ["HandyText"] = Color.FromRgb(0xFB, 0xFB, 0xFB),
-            ["HandyBackground"] = Color.FromRgb(0x2C, 0x2B, 0x29),
-            ["HandyAccent"] = Color.FromRgb(0xDA, 0x58, 0x93),
-            ["HandyLogoPrimary"] = Color.FromRgb(0xF2, 0x8C, 0xBB),
-            ["HandyError"] = Color.FromRgb(0xF8, 0x71, 0x71),
-            ["HandyWarning"] = Color.FromRgb(0xFB, 0xBF, 0x24),
-            ["HandyMidGray"] = Color.FromRgb(0x80, 0x80, 0x80),
-            ["HandyCardBorder"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
-            // White @5% over #2C2B29 (reference cards use bg-white/5).
-            ["HandyCardBackground"] = Color.FromRgb(0x37, 0x36, 0x34),
-            ["HandySecondaryBackground"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
-        };
-
-    // Swappable seam for tests; defaults to reading the OS setting.
+    // Swappable seams for tests; default to reading the real OS state.
     internal static Func<bool> SystemDarkModeProvider = DetectSystemDarkMode;
+    internal static Func<bool> SystemHighContrastProvider = DetectSystemHighContrast;
+
+    /// <summary>The dictionary currently installed in MergedDictionaries.</summary>
+    private static ResourceDictionary? _active;
 
     /// <summary>
     /// Maps "system"|"light"|"dark" to the concrete theme. Unknown, null,
@@ -83,8 +72,10 @@ public static class ThemeManager
     }
 
     /// <summary>
-    /// Reads the Windows Apps theme (Settings → Personalization → Colors).
-    /// Returns false (light) when the value cannot be read.
+    /// Reads the Windows *Apps* theme (Settings → Personalization → Colors →
+    /// "Choose your default app mode"). Returns false (light) when the value
+    /// cannot be read. Deliberately reads <c>AppsUseLightTheme</c> and not
+    /// <c>SystemUsesLightTheme</c>: the latter describes the shell chrome.
     /// </summary>
     public static bool DetectSystemDarkMode()
     {
@@ -103,41 +94,196 @@ public static class ThemeManager
     }
 
     /// <summary>
-    /// The concrete theme most recently applied. Window-chrome consumers
-    /// (title-bar dark mode) read this; defaults to Light before the first
-    /// <see cref="ApplyTheme"/> call, matching HandyTheme.xaml's defaults.
+    /// True when a Windows contrast theme is active, in which case the app
+    /// must stop painting its own palette and defer to <see cref="SystemColors"/>.
+    /// </summary>
+    public static bool DetectSystemHighContrast()
+    {
+        try
+        {
+            return SystemParameters.HighContrast;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The concrete theme most recently applied. Window-chrome consumers read
+    /// this; defaults to Light before the first <see cref="ApplyTheme"/> call.
     /// </summary>
     public static HandyTheme CurrentTheme { get; private set; } = HandyTheme.Light;
 
     /// <summary>
-    /// Raised after <see cref="ApplyTheme"/> swaps the palette so windows can
-    /// refresh non-resource surfaces (the Win32 title bar). Raised on the
-    /// calling (UI) thread; subscribers must not throw.
+    /// True when the palette currently installed is the high-contrast one.
+    /// Callers that need to skip purely decorative colour (brand tint, custom
+    /// shadows) should check this and render no decoration at all.
+    /// </summary>
+    public static bool IsHighContrast { get; private set; }
+
+    /// <summary>
+    /// Raised after the palette is swapped so windows can refresh surfaces WPF
+    /// does not own (the Win32 title bar). Raised synchronously on the calling
+    /// thread; subscribers must not throw.
     /// </summary>
     public static event Action<HandyTheme>? ThemeApplied;
 
     /// <summary>
-    /// Replaces the Handy brush entries in the application resources so every
-    /// DynamicResource consumer updates live. Brushes are frozen (best
-    /// practice: freezable resources shared across the UI avoid per-use
-    /// cloning and thread-affinity cost). No-op palette swap when there is no
-    /// running WPF application (e.g. unit tests) — but CurrentTheme and the
-    /// ThemeApplied event still update so chrome logic stays testable.
+    /// Builds the palette dictionary for the current environment.
+    ///
+    /// High contrast takes precedence over the light/dark choice: the user has
+    /// told the OS they need maximum contrast, so honouring that beats
+    /// honouring a stored Dark preference.
+    /// </summary>
+    internal static ResourceDictionary BuildDictionary()
+    {
+        var highContrast = SystemHighContrastProvider();
+        return highContrast ? BuildHighContrastDictionary() : BuildFromPalette();
+    }
+
+    private static ResourceDictionary BuildFromPalette()
+    {
+        var source = CurrentTheme == HandyTheme.Dark ? Palette.Dark : Palette.Light;
+        var dictionary = new ResourceDictionary();
+
+        foreach (var entry in source)
+        {
+            dictionary[entry.Key] = Freeze(entry.Value);
+        }
+
+        // Legacy Handy-era keys resolve to their semantic replacement so any
+        // not-yet-migrated view keeps working — and keeps theming correctly.
+        foreach (var (legacyKey, semanticKey) in Palette.LegacyAliases)
+        {
+            if (source.TryGetValue(semanticKey, out var color))
+            {
+                dictionary[legacyKey] = Freeze(color);
+            }
+        }
+
+        return dictionary;
+    }
+
+    /// <summary>
+    /// High-contrast palette: every semantic token maps onto a system colour
+    /// so the OS contrast theme owns the appearance.
+    ///
+    /// Status colours intentionally collapse to <see cref="SystemColors.WindowTextColor"/>
+    /// — inventing a red in high contrast is exactly the failure mode the
+    /// contrast themes exist to prevent. Meaning that was conveyed by hue must
+    /// therefore also be conveyed by text or an icon (WCAG 1.4.1), which the
+    /// status views do.
+    /// </summary>
+    private static ResourceDictionary BuildHighContrastDictionary()
+    {
+        var dictionary = new ResourceDictionary();
+
+        void Set(string key, Color color) => dictionary[key] = Freeze(color);
+
+        var window = SystemColors.WindowColor;
+        var windowText = SystemColors.WindowTextColor;
+        var highlight = SystemColors.HighlightColor;
+        var highlightText = SystemColors.HighlightTextColor;
+
+        // Surfaces — flatten to the single window surface (no elevation games
+        // in high contrast; the OS deliberately removes depth cues).
+        Set(Palette.SurfaceCanvas, window);
+        Set(Palette.SurfaceCard, window);
+        Set(Palette.SurfaceSunken, window);
+        Set(Palette.SurfaceHover, highlight);
+        Set(Palette.SurfaceSelected, highlight);
+        Set(Palette.SurfaceOverlay, window);
+
+        // Text — window text everywhere; secondary/tertiary collapse because
+        // a contrast theme has no notion of "muted" (and GreyText is reserved
+        // for genuinely disabled content).
+        Set(Palette.TextPrimary, windowText);
+        Set(Palette.TextSecondary, windowText);
+        Set(Palette.TextMuted, windowText);
+        Set(Palette.TextDisabled, SystemColors.GrayTextColor);
+
+        // Accent.
+        Set(Palette.AccentFill, highlight);
+        Set(Palette.AccentFillHover, highlight);
+        Set(Palette.AccentFillPressed, highlight);
+        Set(Palette.OnAccent, highlightText);
+        Set(Palette.AccentInk, windowText);
+        Set(Palette.AccentSubtle, highlight);
+
+        // Lines and focus. WPF's SystemColors has no Hotlight/HotTrack pair
+        // guaranteed across themes, so the focus ring uses window text — it is
+        // by definition the maximum-contrast line colour in a contrast theme.
+        Set(Palette.BorderSubtle, windowText);
+        Set(Palette.BorderStrong, windowText);
+        Set(Palette.FocusRing, windowText);
+
+        // Status — all collapse to window text; see the method remarks.
+        foreach (var key in new[]
+                 {
+                     Palette.ErrorText, Palette.ErrorSurface,
+                     Palette.WarningText, Palette.WarningSurface,
+                     Palette.SuccessText, Palette.SuccessSurface,
+                 })
+        {
+            Set(key, windowText);
+        }
+
+        Set(Palette.OnError, window);
+        Set(Palette.OnWarning, window);
+        Set(Palette.OnSuccess, window);
+
+        // Legacy aliases resolve against the high-contrast values above.
+        foreach (var (legacyKey, semanticKey) in Palette.LegacyAliases)
+        {
+            if (dictionary[semanticKey] is SolidColorBrush brush)
+            {
+                dictionary[legacyKey] = brush;
+            }
+        }
+
+        return dictionary;
+    }
+
+    /// <summary>
+    /// Brushes are frozen: they are shared across the whole visual tree, so
+    /// freezing removes per-use change-notification cost and makes them safe
+    /// to hand to other threads.
+    /// </summary>
+    private static SolidColorBrush Freeze(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>
+    /// Installs the palette for <paramref name="theme"/>.
+    ///
+    /// No-ops the dictionary swap when there is no running WPF application
+    /// (unit tests), but still updates <see cref="CurrentTheme"/> and raises
+    /// <see cref="ThemeApplied"/> so chrome logic stays testable.
     /// </summary>
     public static void ApplyTheme(HandyTheme theme)
     {
         CurrentTheme = theme;
+        IsHighContrast = SystemHighContrastProvider();
 
-        var app = System.Windows.Application.Current;
+        var app = Application.Current;
         if (app is not null)
         {
-            var palette = theme == HandyTheme.Dark ? DarkPalette : LightPalette;
-            foreach (var entry in palette)
+            var dictionaries = app.Resources.MergedDictionaries;
+            var replacement = BuildDictionary();
+
+            // Append-last so the active theme wins merged-dictionary lookup,
+            // then drop the previous one.
+            dictionaries.Add(replacement);
+            if (_active is not null)
             {
-                var brush = new SolidColorBrush(entry.Value);
-                brush.Freeze();
-                app.Resources[entry.Key] = brush;
+                dictionaries.Remove(_active);
             }
+
+            _active = replacement;
         }
 
         try
@@ -157,6 +303,10 @@ public static class ThemeManager
     /// app with a white title bar is the classic symptom. Safe no-op when the
     /// window has no handle yet (call again from SourceInitialized) or on
     /// systems without DWM support. Never throws.
+    ///
+    /// Note: the documented behaviour is that setting TRUE makes the bar
+    /// "follow the system setting", but in practice it always paints dark —
+    /// so the value is driven from our own theme state, not left to DWM.
     /// </summary>
     public static void ApplyWindowChrome(System.Windows.Window window)
     {
@@ -180,6 +330,12 @@ public static class ThemeManager
     public static void ApplyWindowChrome(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // A contrast theme owns the chrome; do not fight it.
+        if (IsHighContrast)
         {
             return;
         }
