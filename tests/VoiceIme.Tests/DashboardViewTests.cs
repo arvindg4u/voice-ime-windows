@@ -16,8 +16,12 @@ public sealed class DashboardViewTests
     [Fact]
     public void EmptyStore_ShowsEmptyState()
     {
-        TryRunOnSta(view =>
+        StaTestHelper.TryRunOnSta(() =>
         {
+            var store = new SettingsStore();
+            var clips = new ClipboardStore();
+            var view = new DashboardView(store, clips);
+
             Assert.True(view.IsRecentEmptyVisible);
             Assert.Null(view.LatestTranscript);
         });
@@ -26,8 +30,11 @@ public sealed class DashboardViewTests
     [Fact]
     public void RecentEntry_ShowsTranscriptAndTime()
     {
-        TryRunOnSta((store, clips, view) =>
+        StaTestHelper.TryRunOnSta(() =>
         {
+            var store = new SettingsStore();
+            var clips = new ClipboardStore();
+            var view = new DashboardView(store, clips);
             clips.Add("hello world");
 
             view.RefreshFromStores();
@@ -43,9 +50,11 @@ public sealed class DashboardViewTests
     [Fact]
     public void HotkeyHint_MentionsStoredHotkey()
     {
-        TryRunOnSta((store, _, view) =>
+        StaTestHelper.TryRunOnSta(() =>
         {
+            var store = new SettingsStore();
             store.Hotkey = "Alt+F4";
+            var view = new DashboardView(store, new ClipboardStore());
             view.RefreshFromStores();
 
             Assert.Equal("Press Alt+F4 to dictate.", view.HotkeyHint);
@@ -58,32 +67,11 @@ public sealed class DashboardViewTests
     {
         var store = new SettingsStore();
         var clips = new ClipboardStore();
-        TryRunOnSta(() =>
+        StaTestHelper.TryRunOnSta(() =>
         {
             var view = new DashboardView(store, clips);
             Assert.Same(store, view.BoundSettings);
             Assert.Same(clips, view.BoundStore);
         });
     }
-
-    /// <summary>Builds a dashboard with fresh in-memory stores on the STA thread.</summary>
-    private static bool TryRunOnSta(Action<DashboardView> body) =>
-        StaTestHelper.TryRunOnSta(() =>
-        {
-            var store = new SettingsStore();
-            var clips = new ClipboardStore();
-            var view = new DashboardView(store, clips);
-            body(view);
-        });
-
-    /// <summary>Builds a dashboard, exposing the stores so tests can mutate them first.</summary>
-    private static bool TryRunOnSta(
-        Action<SettingsStore, ClipboardStore, DashboardView> body) =>
-        StaTestHelper.TryRunOnSta(() =>
-        {
-            var store = new SettingsStore();
-            var clips = new ClipboardStore();
-            var view = new DashboardView(store, clips);
-            body(store, clips, view);
-        });
 }
