@@ -69,6 +69,9 @@ for Windows keeps the Android core (record 16 kHz WAV → Gemini
   chat apps: anywhere with a text field.
 - **Tray-first** — `NotifyIcon` owns the lifecycle: Dictate / Settings /
   History / Quit. No window clutter.
+- **Modern settings shell** — dashboard home with state and quick actions,
+  grouped settings pages, light/dark themes that follow Windows, and a
+  compact bottom-center recording overlay.
 - **Voice pipeline** — 16 kHz mono 16-bit PCM → in-memory WAV → Gemini
   `generateContent` with base64 inline audio.
 - **Clipboard + Ctrl+V delivery** — transcript lands in the focused window;
@@ -188,8 +191,15 @@ src/VoiceIme/                      # WPF WinExe, net8.0-windows
 ├── NativeInput.cs                 # RegisterHotKey + clipboard/Ctrl+V via SendInput
 ├── SettingsStore.cs               # DPAPI-encrypted settings (%AppData%)
 ├── ClipboardStore.cs              # transcript history (cap 100, pin survives)
-├── SettingsWindow.xaml(.cs)       # settings form + Test button
-└── HistoryWindow.xaml(.cs)        # history list (copy / pin / delete)
+├── Theme/HandyTheme.xaml          # design tokens + shared controls (light + dark)
+├── OverlayWindow.xaml(.cs)        # compact recording/uploading pill
+└── Views/
+    ├── DashboardView.xaml(.cs)    # home: state, hotkey hint, quick actions, recent transcript
+    ├── GeneralSettingsView.xaml(.cs)
+    ├── GeminiSettingsView.xaml(.cs)
+    ├── HistorySettingsView.xaml(.cs)
+    ├── AdvancedSettingsView.xaml(.cs)
+    └── AboutSettingsView.xaml(.cs)
 
 tests/VoiceIme.Tests/              # xUnit + RichardSzalay.MockHttp
 ├── AudioRecorderTests.cs          # WAV header, test tone, magnitude, silence

@@ -41,6 +41,14 @@ public sealed class AppWiringTests : IDisposable
                     settings,
                     Assert.IsType<GeminiSettingsView>(
                         window.SectionView(MainSection.Gemini)).BoundSettings);
+                Assert.Same(
+                    settings,
+                    Assert.IsType<DashboardView>(
+                        window.SectionView(MainSection.Dashboard)).BoundSettings);
+                Assert.Same(
+                    clips,
+                    Assert.IsType<DashboardView>(
+                        window.SectionView(MainSection.Dashboard)).BoundStore);
             }
             finally
             {
@@ -64,6 +72,14 @@ public sealed class AppWiringTests : IDisposable
                     settings,
                     Assert.IsType<AdvancedSettingsView>(
                         window.SectionView(MainSection.Advanced)).BoundSettings);
+                Assert.Same(
+                    settings,
+                    Assert.IsType<DashboardView>(
+                        window.SectionView(MainSection.Dashboard)).BoundSettings);
+                Assert.Same(
+                    clips,
+                    Assert.IsType<DashboardView>(
+                        window.SectionView(MainSection.Dashboard)).BoundStore);
             }
             finally
             {
@@ -87,6 +103,14 @@ public sealed class AppWiringTests : IDisposable
                     settings,
                     Assert.IsType<AboutSettingsView>(
                         window.SectionView(MainSection.About)).BoundSettings);
+                Assert.Same(
+                    settings,
+                    Assert.IsType<DashboardView>(
+                        window.SectionView(MainSection.Dashboard)).BoundSettings);
+                Assert.Same(
+                    clips,
+                    Assert.IsType<DashboardView>(
+                        window.SectionView(MainSection.Dashboard)).BoundStore);
             }
             finally
             {
@@ -111,6 +135,11 @@ public sealed class AppWiringTests : IDisposable
                     window.SectionView(MainSection.History));
                 Assert.Same(clips, history.BoundStore);
                 Assert.Equal("spoken earlier", Assert.Single(history.Rows).Body);
+
+                var dashboard = Assert.IsType<DashboardView>(
+                    window.SectionView(MainSection.Dashboard));
+                Assert.Same(clips, dashboard.BoundStore);
+                Assert.False(dashboard.IsRecentEmptyVisible);
             }
             finally
             {

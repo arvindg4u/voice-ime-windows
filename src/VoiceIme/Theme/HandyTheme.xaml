@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:VoiceIme">
 
     <!--
         Handy design tokens (Task 1 of the Handy UI port).
@@ -206,6 +207,352 @@
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="IsSnapToTickEnabled" Value="False" />
         <Setter Property="TickPlacement" Value="None" />
+    </Style>
+
+    <!-- ====================================================================
+         Extended design tokens (redesign): secondary text, hover/active
+         tints, hairline dividers, focus ring, disabled ink.
+         ==================================================================== -->
+    <SolidColorBrush x:Key="HandyTextSecondary" Color="#5F5F5F" />
+    <SolidColorBrush x:Key="HandyHoverBackground" Color="#EFEFEF" />
+    <SolidColorBrush x:Key="HandyActiveBackground" Color="#FDE9F0" />
+    <SolidColorBrush x:Key="HandyDivider" Color="#E5E5E5" />
+    <SolidColorBrush x:Key="HandyFocusBorder" Color="#DA5893" />
+    <SolidColorBrush x:Key="HandyInkDisabled" Color="#C7C7C7" />
+
+    <!-- ====================================================================
+         Typography
+         ==================================================================== -->
+    <Style x:Key="HandyPageTitle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="Margin" Value="0,0,0,2" />
+    </Style>
+
+    <Style x:Key="HandySectionLabel" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="Margin" Value="0,0,0,2" />
+    </Style>
+
+    <Style x:Key="HandyBody" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+
+    <Style x:Key="HandyCaption" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyTextSecondary}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+
+    <Style x:Key="HandyCaptionSmall" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyTextSecondary}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- ====================================================================
+         Toggle switch: 40x22 Windows-style pill with an animating knob.
+         ==================================================================== -->
+    <Style x:Key="HandyToggleSwitch" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Width" Value="40" />
+        <Setter Property="Height" Value="22" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource HandyFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid>
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualState x:Name="Normal" />
+                                <VisualState x:Name="PointerOver">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Track"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.2" />
+                                    </Storyboard>
+                                </VisualState>
+                            </VisualStateGroup>
+                            <VisualStateGroup x:Name="CheckStates">
+                                <VisualState x:Name="Checked">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Knob"
+                                                         Storyboard.TargetProperty="(TranslateTransform.X)"
+                                                         To="18" Duration="0:0:0.2" />
+                                        <ColorAnimation Storyboard.TargetName="TrackFill"
+                                                        Storyboard.TargetProperty="(SolidColorBrush.Color)"
+                                                        To="#DA5893" Duration="0:0:0.2" />
+                                    </Storyboard>
+                                </VisualState>
+                                <VisualState x:Name="Unchecked">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Knob"
+                                                         Storyboard.TargetProperty="(TranslateTransform.X)"
+                                                         To="0" Duration="0:0:0.2" />
+                                        <ColorAnimation Storyboard.TargetName="TrackFill"
+                                                        Storyboard.TargetProperty="(SolidColorBrush.Color)"
+                                                        To="#808080" Duration="0:0:0.2" />
+                                    </Storyboard>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <Border x:Name="Track" CornerRadius="11" Height="22" Width="40">
+                            <Border.Background>
+                                <SolidColorBrush x:Name="TrackFill" Color="{DynamicResource HandyMidGray}" Opacity="0.5" />
+                            </Border.Background>
+                        </Border>
+                        <Ellipse x:Name="Knob" Width="16" Height="16" Fill="White" Margin="3,3,0,0">
+                            <Ellipse.RenderTransform>
+                                <TranslateTransform X="0" />
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
+                        <ContentPresenter Margin="44,0,0,0" VerticalAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.5" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ====================================================================
+         Focus visual: accent ring for keyboard navigation.
+         ==================================================================== -->
+    <Style x:Key="HandyFocusVisual" TargetType="Control">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border BorderBrush="{DynamicResource HandyFocusBorder}" BorderThickness="1.5"
+                            CornerRadius="3" Margin="-2" IsHitTestVisible="False" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         Navigation rail item: 44px tall, 10px radius; active = accent tint.
+         ==================================================================== -->
+    <Style x:Key="HandyNavButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Height" Value="44" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource HandyFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="10">
+                        <Grid>
+                            <Border x:Name="ActiveFill" CornerRadius="10"
+                                    Background="{DynamicResource HandyActiveBackground}"
+                                    Visibility="Collapsed" />
+                            <Border x:Name="HoverFill" CornerRadius="10"
+                                    Background="{DynamicResource HandyHoverBackground}"
+                                    Visibility="Collapsed" />
+                            <ContentPresenter Margin="12,0" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HoverFill" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="local:MainWindow.IsNavActive" Value="True">
+                            <Setter TargetName="ActiveFill" Property="Background" Value="{DynamicResource HandyLogoPrimary}" />
+                            <Setter TargetName="ActiveFill" Property="Opacity" Value="0.8" />
+                            <Setter TargetName="ActiveFill" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         Buttons
+         ==================================================================== -->
+    <Style x:Key="HandyPrimaryButton" TargetType="Button">
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Background" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="Padding" Value="16,10" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="MinWidth" Value="100" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource HandyFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}"
+                            CornerRadius="8" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.9" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.75" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HandySecondaryButton" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HandyDivider}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="MinWidth" Value="100" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource HandyFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource HandyHoverBackground}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource HandyAccent}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.8" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.4" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource HandyInkDisabled}" />
+                            <Setter Property="Foreground" Value="{DynamicResource HandyInkDisabled}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="HandyDangerButton" TargetType="Button" BasedOn="{StaticResource HandySecondaryButton}">
+        <Setter Property="Foreground" Value="{DynamicResource HandyError}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource HandyError}" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="BorderBrush" Value="{DynamicResource HandyError}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="HandyDashboardTile" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource HandyCardBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HandyCardBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource HandyFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="12" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Background" Value="{DynamicResource HandyHoverBackground}" />
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource HandyAccent}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         Text input (refined): subtle hairline, accent focus ring.
+         ==================================================================== -->
+    <Style x:Key="HandyTextBox" TargetType="TextBox">
+        <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CaretBrush" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource HandyAccent}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HandyCardBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource HandyFocusVisual}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Root" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource HandyAccent}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Root" Property="Opacity" Value="0.5" />
+                            <Setter Property="Foreground" Value="{DynamicResource HandyInkDisabled}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ====================================================================
+         Info bar: dismissible banner used for the first-run hint.
+         ==================================================================== -->
+    <Style x:Key="HandyInfoBar" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource HandyCardBackground}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource HandyCardBorder}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="14,12" />
+        <Setter Property="Margin" Value="0,0,0,16" />
     </Style>
 
 </ResourceDictionary>

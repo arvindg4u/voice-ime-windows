@@ -2,56 +2,64 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Focusable="True">
-    <!-- Advanced section (Handy AdvancedSettings port, read-only-safe
-         subset): App group (start-hidden, autostart, tray icon, overlay
-         toggles), Output group (paste-method dropdown), History group
-         (history-limit numeric, clamped 10–500). All brushes and the
-         card/row/toggle styles resolve from Theme/HandyTheme.xaml via
-         DynamicResource. Hosted by MainWindow through
-         RegisterSectionView(MainSection.Advanced, view). -->
+    <!-- Advanced section (redesign): page title, then grouped cards — app
+         behavior (start hidden, autostart, tray icon, overlay), output
+         (paste method, auto-submit), and history limit. Every x:Name and
+         event handler the code-behind relies on is preserved; brushes
+         resolve from Theme/HandyTheme.xaml via DynamicResource. -->
     <StackPanel>
-        <TextBlock Text="APP" Style="{DynamicResource HandyGroupHeader}" Margin="0,0,0,8" />
-        <Border Style="{DynamicResource HandySettingCard}">
+        <TextBlock Text="Advanced" Style="{DynamicResource HandyPageTitle}" />
+        <TextBlock Text="App behavior, output delivery, and history retention."
+                   Style="{DynamicResource HandyCaption}" />
+
+        <!-- App card -->
+        <Border Style="{DynamicResource HandySettingCard}" Margin="0,12,0,0">
             <StackPanel>
+                <TextBlock Text="APP" Style="{DynamicResource HandyCaptionSmall}"
+                           Foreground="{DynamicResource HandyTextSecondary}" />
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <CheckBox x:Name="StartHiddenCheck" DockPanel.Dock="Right"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
-                              Style="{DynamicResource HandyToggle}"
+                              Style="{DynamicResource HandyToggleSwitch}"
                               Click="StartHiddenCheck_Click" />
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Start hidden" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Launch to the tray without showing the window. Stored for now."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                        <TextBlock Text="Launch to the tray without showing the window."
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <CheckBox x:Name="AutostartCheck" DockPanel.Dock="Right"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
-                              Style="{DynamicResource HandyToggle}"
+                              Style="{DynamicResource HandyToggleSwitch}"
                               Click="AutostartCheck_Click" />
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Start with Windows" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Launch the app at sign-in. Stored for now."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                        <TextBlock Text="Launch the app at sign-in."
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <CheckBox x:Name="ShowTrayIconCheck" DockPanel.Dock="Right"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
-                              Style="{DynamicResource HandyToggle}"
+                              Style="{DynamicResource HandyToggleSwitch}"
                               Click="ShowTrayIconCheck_Click" />
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Show tray icon" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Show the tray icon. Stored for now."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                        <TextBlock Text="Show the tray icon."
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <ComboBox x:Name="ShowOverlayBox" DockPanel.Dock="Right" MinWidth="200"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
@@ -62,16 +70,19 @@
                         <TextBlock Text="Show overlay" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock Text="Overlay detail: Full pill, Minimal pill without the waveform, or None."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
             </StackPanel>
         </Border>
 
-        <TextBlock Text="OUTPUT" Style="{DynamicResource HandyGroupHeader}" />
-        <Border Style="{DynamicResource HandySettingCard}">
+        <!-- Output card -->
+        <Border Style="{DynamicResource HandySettingCard}" Margin="0,12,0,0">
             <StackPanel>
+                <TextBlock Text="OUTPUT" Style="{DynamicResource HandyCaptionSmall}"
+                           Foreground="{DynamicResource HandyTextSecondary}" />
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <ComboBox x:Name="PasteMethodBox" DockPanel.Dock="Right" MinWidth="200"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
@@ -82,29 +93,33 @@
                         <TextBlock Text="Paste method" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock Text="The keystroke sent after the transcript lands on the clipboard."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <CheckBox x:Name="AutoSubmitCheck" DockPanel.Dock="Right"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
-                              Style="{DynamicResource HandyToggle}"
+                              Style="{DynamicResource HandyToggleSwitch}"
                               Click="AutoSubmitCheck_Click" />
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="Auto-submit" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock Text="Press Enter right after pasting (for search boxes and chat inputs)."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
             </StackPanel>
         </Border>
 
-        <TextBlock Text="HISTORY" Style="{DynamicResource HandyGroupHeader}" />
-        <Border Style="{DynamicResource HandySettingCard}">
+        <!-- History card -->
+        <Border Style="{DynamicResource HandySettingCard}" Margin="0,12,0,0">
             <StackPanel>
+                <TextBlock Text="HISTORY" Style="{DynamicResource HandyCaptionSmall}"
+                           Foreground="{DynamicResource HandyTextSecondary}" />
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
                                 VerticalAlignment="Center" HorizontalAlignment="Right">
@@ -116,13 +131,13 @@
                                  LostFocus="HistoryLimitBox_LostFocus" />
                         <TextBlock Text="entries" Margin="6,0,0,0"
                                    VerticalAlignment="Center" FontSize="12"
-                                   Foreground="{DynamicResource HandyMidGray}" />
+                                   Foreground="{DynamicResource HandyTextSecondary}" />
                     </StackPanel>
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock Text="History limit" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock Text="Max stored transcripts (10–500). Out-of-range values clamp on save."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>

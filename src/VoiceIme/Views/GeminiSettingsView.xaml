@@ -2,17 +2,23 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Focusable="True">
-    <!-- Gemini section (Handy post-processing API group port): Handy's
-         provider/model pickers are replaced by our fixed Gemini fields —
-         stacked Base URL, API keys, and Model with reset-to-defaults, then
-         the custom-prompt group (multi-line editor, char-count hint, tip),
-         then the Test/Save footer with inline status. All brushes and styles
-         resolve from Theme/HandyTheme.xaml via DynamicResource. Hosted by
-         MainWindow through RegisterSectionView(MainSection.Gemini, view). -->
+    <!-- Gemini section (redesign): page title, an API card (Base URL, API
+         keys, Model, reset-to-defaults) and a prompt-library card (saved
+         prompt picker, editor with char count, Save/Delete), then the
+         Test/Save footer with inline status. Every x:Name and event handler
+         the code-behind relies on is preserved. Brushes resolve from
+         Theme/HandyTheme.xaml via DynamicResource. -->
     <StackPanel>
-        <TextBlock Text="GEMINI API" Style="{DynamicResource HandyGroupHeader}" Margin="0,0,0,8" />
-        <Border Style="{DynamicResource HandySettingCard}">
+        <TextBlock Text="Gemini API" Style="{DynamicResource HandyPageTitle}" />
+        <TextBlock Text="Base URL, API keys, model, and the custom system prompt sent with every transcription."
+                   Style="{DynamicResource HandyCaption}" />
+
+        <!-- API card -->
+        <Border Style="{DynamicResource HandySettingCard}" Margin="0,12,0,0">
             <StackPanel>
+                <TextBlock Text="API" Style="{DynamicResource HandyCaptionSmall}"
+                           Foreground="{DynamicResource HandyTextSecondary}" />
+
                 <TextBlock Text="Base URL" FontWeight="SemiBold" FontSize="13"
                            Foreground="{DynamicResource HandyText}" />
                 <TextBox x:Name="BaseUrlBox" Margin="0,4,0,12"
@@ -21,7 +27,7 @@
                 <TextBlock Text="API keys" FontWeight="SemiBold" FontSize="13"
                            Foreground="{DynamicResource HandyText}" />
                 <TextBlock Text="One per line — auto-rotates on rate limit."
-                           FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                           FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                            TextWrapping="Wrap" />
                 <TextBox x:Name="KeysBox" Margin="0,4,0,12" Height="90"
                          AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
@@ -33,16 +39,19 @@
                 <TextBox x:Name="ModelBox" Margin="0,4,0,8"
                          Style="{DynamicResource HandyTextBox}" />
                 <Button x:Name="ResetButton" Content="Reset to defaults"
-                        HorizontalAlignment="Left" Padding="12,4"
+                        HorizontalAlignment="Left" Padding="12,8"
                         Style="{DynamicResource HandySecondaryButton}"
                         ToolTip="Restore the default Base URL, model, and prompt (keys are kept)"
                         Click="ResetButton_Click" />
             </StackPanel>
         </Border>
 
-        <TextBlock Text="PROMPT LIBRARY" Style="{DynamicResource HandyGroupHeader}" />
-        <Border Style="{DynamicResource HandySettingCard}">
+        <!-- Prompt library card -->
+        <Border Style="{DynamicResource HandySettingCard}" Margin="0,12,0,0">
             <StackPanel>
+                <TextBlock Text="PROMPT LIBRARY" Style="{DynamicResource HandyCaptionSmall}"
+                           Foreground="{DynamicResource HandyTextSecondary}" />
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <ComboBox x:Name="PromptSelector" DockPanel.Dock="Right" MinWidth="200"
                               VerticalAlignment="Center" HorizontalAlignment="Right"
@@ -54,10 +63,11 @@
                         <TextBlock Text="Saved prompt" FontWeight="SemiBold" FontSize="13"
                                    Foreground="{DynamicResource HandyText}" />
                         <TextBlock Text="Pick a saved prompt to edit it below."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                                   FontSize="12" Foreground="{DynamicResource HandyTextSecondary}"
                                    TextWrapping="Wrap" />
                     </StackPanel>
                 </DockPanel>
+
                 <DockPanel Style="{DynamicResource HandySettingRow}">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
                                 VerticalAlignment="Center" HorizontalAlignment="Right">
@@ -78,6 +88,7 @@
                                  ToolTip="Prompt name (max 60 chars)" />
                     </StackPanel>
                 </DockPanel>
+
                 <TextBlock Text="Active prompt text (max 2000 chars, blank to disable)"
                            FontWeight="SemiBold" FontSize="13"
                            Foreground="{DynamicResource HandyText}" />
@@ -88,15 +99,16 @@
                          TextChanged="PromptBox_TextChanged" />
                 <TextBlock x:Name="PromptHint" FontSize="12"
                            HorizontalAlignment="Right"
-                           Foreground="{DynamicResource HandyMidGray}"
+                           Foreground="{DynamicResource HandyTextSecondary}"
                            Text="0/2000 characters" />
                 <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap"
-                           Foreground="{DynamicResource HandyMidGray}"
+                           Foreground="{DynamicResource HandyTextSecondary}"
                            Text="Tip: blank disables the custom prompt. Otherwise the text is sent as the system instruction with every transcription." />
             </StackPanel>
         </Border>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <!-- Footer -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button x:Name="TestButton" Content="Test" Width="90" Margin="0,0,8,0"
                     Style="{DynamicResource HandyPrimaryButton}"
                     ToolTip="Send a test tone through the full pipeline"
@@ -106,6 +118,6 @@
                     Click="SaveButton_Click" />
         </StackPanel>
         <TextBlock x:Name="StatusText" Margin="0,12,0,0" TextWrapping="Wrap"
-                   Foreground="{DynamicResource HandyMidGray}" />
+                   Foreground="{DynamicResource HandyTextSecondary}" />
     </StackPanel>
 </UserControl>

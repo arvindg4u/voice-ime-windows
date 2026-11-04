@@ -20,6 +20,7 @@ public sealed class MainNavTests
     {
         var expected = new[]
         {
+            MainSection.Dashboard,
             MainSection.General,
             MainSection.History,
             MainSection.Gemini,
@@ -31,6 +32,7 @@ public sealed class MainNavTests
     }
 
     [Theory]
+    [InlineData(MainSection.Dashboard, "Dashboard")]
     [InlineData(MainSection.General, "General")]
     [InlineData(MainSection.History, "History")]
     [InlineData(MainSection.Gemini, "Gemini")]

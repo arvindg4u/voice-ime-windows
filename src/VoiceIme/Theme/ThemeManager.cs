@@ -46,6 +46,12 @@ public static class ThemeManager
             ["HandyCardBorder"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
             ["HandyCardBackground"] = Color.FromRgb(0xFF, 0xFF, 0xFF),
             ["HandySecondaryBackground"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
+            ["HandyTextSecondary"] = Color.FromRgb(0x5F, 0x5F, 0x5F),
+            ["HandyHoverBackground"] = Color.FromRgb(0xEF, 0xEF, 0xEF),
+            ["HandyActiveBackground"] = Color.FromRgb(0xFD, 0xE9, 0xF0),
+            ["HandyDivider"] = Color.FromRgb(0xE5, 0xE5, 0xE5),
+            ["HandyFocusBorder"] = Color.FromRgb(0xDA, 0x58, 0x93),
+            ["HandyInkDisabled"] = Color.FromRgb(0xC7, 0xC7, 0xC7),
         };
 
     private static readonly IReadOnlyDictionary<string, Color> DarkPalette =
@@ -62,6 +68,12 @@ public static class ThemeManager
             // White @5% over #2C2B29 (reference cards use bg-white/5).
             ["HandyCardBackground"] = Color.FromRgb(0x37, 0x36, 0x34),
             ["HandySecondaryBackground"] = Color.FromArgb(0x33, 0x80, 0x80, 0x80),
+            ["HandyTextSecondary"] = Color.FromRgb(0xA8, 0xA7, 0xA4),
+            ["HandyHoverBackground"] = Color.FromRgb(0x38, 0x37, 0x35),
+            ["HandyActiveBackground"] = Color.FromRgb(0x3B, 0x2D, 0x32),
+            ["HandyDivider"] = Color.FromRgb(0x3A, 0x39, 0x37),
+            ["HandyFocusBorder"] = Color.FromRgb(0xDA, 0x58, 0x93),
+            ["HandyInkDisabled"] = Color.FromRgb(0x6E, 0x6D, 0x6B),
         };
 
     // Swappable seam for tests; defaults to reading the OS setting.

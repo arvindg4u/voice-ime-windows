@@ -18,14 +18,14 @@ namespace VoiceIme.Tests;
 public sealed class MainWindowTests
 {
     [Fact]
-    public void Constructor_DefaultsToGeneralSection()
+    public void Constructor_DefaultsToDashboardSection()
     {
         if (!TryRunOnSta(window =>
         {
-            Assert.Equal(MainSection.General, window.CurrentSection);
-            Assert.True(MainWindow.GetIsNavActive(window.NavButtonFor(MainSection.General)));
+            Assert.Equal(MainSection.Dashboard, window.CurrentSection);
+            Assert.True(MainWindow.GetIsNavActive(window.NavButtonFor(MainSection.Dashboard)));
             Assert.All(
-                MainNav.Ordered.Where(s => s != MainSection.General),
+                MainNav.Ordered.Where(s => s != MainSection.Dashboard),
                 s => Assert.False(MainWindow.GetIsNavActive(window.NavButtonFor(s))));
         }))
         {

@@ -1,0 +1,123 @@
+<UserControl x:Class="VoiceIme.Views.DashboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+    <!-- Dashboard (home): app state, hotkey hint, quick-action tiles to every
+         section, and the most recent transcript. Hosted by MainWindow via
+         RegisterSectionView(MainSection.Dashboard, view). -->
+    <StackPanel>
+        <!-- Header -->
+        <TextBlock Text="Voice IME" Style="{DynamicResource HandyPageTitle}" />
+        <TextBlock x:Name="TaglineText" Style="{DynamicResource HandyCaption}" />
+
+        <!-- Status -->
+        <Border Style="{DynamicResource HandySettingCard}" Margin="0,16,0,0">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,8" LastChildFill="False">
+                    <TextBlock Text="STATUS" Style="{DynamicResource HandyCaptionSmall}"
+                               Foreground="{DynamicResource HandyTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <Ellipse x:Name="StatusDot" Width="8" Height="8"
+                             Fill="{DynamicResource HandyAccent}"
+                             DockPanel.Dock="Right" Margin="0,0,10,0"
+                             VerticalAlignment="Center" />
+                    <TextBlock x:Name="StateText" Text="Idle — ready to dictate"
+                               FontSize="13" FontWeight="SemiBold"
+                               Foreground="{DynamicResource HandyText}"
+                               DockPanel.Dock="Right" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock x:Name="HotkeyHintText" Style="{DynamicResource HandyBody}" />
+            </StackPanel>
+        </Border>
+
+        <!-- Quick actions -->
+        <TextBlock Text="QUICK ACTIONS" Style="{DynamicResource HandyCaptionSmall}"
+                   Margin="0,28,0,8" />
+        <WrapPanel ItemWidth="190" ItemHeight="150" Margin="0,0,0,-12">
+            <Button Style="{DynamicResource HandyDashboardTile}" Tag="General"
+                    Click="SectionTile_Click">
+                <StackPanel>
+                    <TextBlock Text="⚙️" FontSize="24" Margin="0,0,0,10" />
+                    <TextBlock Text="General" Style="{DynamicResource HandySectionLabel}" />
+                    <TextBlock Text="Hotkey, activation mode, sound"
+                               Style="{DynamicResource HandyCaption}" TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Button>
+            <Button Style="{DynamicResource HandyDashboardTile}" Tag="Gemini"
+                    Click="SectionTile_Click">
+                <StackPanel>
+                    <TextBlock Text="✨" FontSize="24" Margin="0,0,0,10" />
+                    <TextBlock Text="Gemini API" Style="{DynamicResource HandySectionLabel}" />
+                    <TextBlock Text="API keys, model, custom prompt + Test"
+                               Style="{DynamicResource HandyCaption}" TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Button>
+            <Button Style="{DynamicResource HandyDashboardTile}" Tag="History"
+                    Click="SectionTile_Click">
+                <StackPanel>
+                    <TextBlock Text="🕘" FontSize="24" Margin="0,0,0,10" />
+                    <TextBlock Text="History" Style="{DynamicResource HandySectionLabel}" />
+                    <TextBlock Text="Past transcripts, copy, pin, delete"
+                               Style="{DynamicResource HandyCaption}" TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Button>
+            <Button Style="{DynamicResource HandyDashboardTile}" Tag="Advanced"
+                    Click="SectionTile_Click">
+                <StackPanel>
+                    <TextBlock Text="🔧" FontSize="24" Margin="0,0,0,10" />
+                    <TextBlock Text="Advanced" Style="{DynamicResource HandySectionLabel}" />
+                    <TextBlock Text="Autostart, tray, overlay, paste"
+                               Style="{DynamicResource HandyCaption}" TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Button>
+            <Button Style="{DynamicResource HandyDashboardTile}" Tag="About"
+                    Click="SectionTile_Click">
+                <StackPanel>
+                    <TextBlock Text="ℹ️" FontSize="24" Margin="0,0,0,10" />
+                    <TextBlock Text="About" Style="{DynamicResource HandySectionLabel}" />
+                    <TextBlock Text="Theme, version, licenses, source"
+                               Style="{DynamicResource HandyCaption}" TextWrapping="Wrap"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Button>
+        </WrapPanel>
+
+        <!-- Recent transcript -->
+        <TextBlock Text="RECENT TRANSCRIPT" Style="{DynamicResource HandyCaptionSmall}"
+                   Margin="0,28,0,8" />
+        <Border Style="{DynamicResource HandySettingCard}">
+            <StackPanel>
+                <!-- Filled state -->
+                <StackPanel x:Name="RecentFilled" Visibility="Collapsed">
+                    <TextBlock x:Name="RecentBody" FontStyle="Italic" FontSize="14"
+                               Foreground="{DynamicResource HandyText}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="RecentTime" Style="{DynamicResource HandyCaptionSmall}"
+                               HorizontalAlignment="Right" Margin="0,4,0,0" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                Margin="0,8,0,0">
+                        <Button x:Name="RecentCopyButton" Content="Copy"
+                                Padding="10,6"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                Click="RecentCopyButton_Click" />
+                        <Button x:Name="RecentOpenHistoryButton" Content="Open history"
+                                Padding="10,6" Margin="8,0,0,0"
+                                Style="{DynamicResource HandySecondaryButton}"
+                                Click="RecentOpenHistoryButton_Click" />
+                    </StackPanel>
+                </StackPanel>
+                <!-- Empty state -->
+                <StackPanel x:Name="RecentEmpty">
+                    <TextBlock Text="No transcripts yet — dictate something first."
+                               Style="{DynamicResource HandyCaption}" />
+                    <Button Content="Open history" Padding="10,6" Margin="0,10,0,0"
+                            Style="{DynamicResource HandySecondaryButton}"
+                            Click="OpenHistoryButton_Click" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

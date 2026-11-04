@@ -7,6 +7,7 @@ namespace VoiceIme;
 /// </summary>
 public enum MainSection
 {
+    Dashboard,
     General,
     History,
     Gemini,

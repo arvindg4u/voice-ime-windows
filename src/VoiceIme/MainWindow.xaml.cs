@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace VoiceIme;
 
@@ -40,7 +41,7 @@ public partial class MainWindow : Window
     private SettingsStore? _firstRunHintSettings;
     private Action<SettingsStore>? _firstRunHintSaver;
 
-    public MainSection CurrentSection { get; private set; } = MainSection.General;
+    public MainSection CurrentSection { get; private set; } = MainSection.Dashboard;
 
     public MainWindow()
         : this(
@@ -48,7 +49,8 @@ public partial class MainWindow : Window
             () => new Views.GeminiSettingsView(),
             () => new Views.HistorySettingsView(),
             () => new Views.AdvancedSettingsView(),
-            () => new Views.AboutSettingsView())
+            () => new Views.AboutSettingsView(),
+            () => new Views.DashboardView())
     {
     }
 
@@ -63,11 +65,18 @@ public partial class MainWindow : Window
         Func<object?>? createGeminiView = null,
         Func<object?>? createHistoryView = null,
         Func<object?>? createAdvancedView = null,
-        Func<object?>? createAboutView = null)
+        Func<object?>? createAboutView = null,
+        Func<object?>? createDashboardView = null)
     {
         InitializeComponent();
         VersionText.Text = "v" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0");
         BuildNav();
+        var dashboard = createDashboardView?.Invoke();
+        if (dashboard is not null)
+        {
+            RegisterSectionView(MainSection.Dashboard, dashboard);
+        }
+
         var general = createGeneralView?.Invoke();
         if (general is not null)
         {
@@ -98,7 +107,9 @@ public partial class MainWindow : Window
             RegisterSectionView(MainSection.About, about);
         }
 
-        NavigateTo(MainSection.General);
+        // The dashboard is the shell's home: it lands users on state and
+        // quick actions instead of an arbitrary settings section.
+        NavigateTo(MainSection.Dashboard);
     }
 
     /// <summary>
@@ -280,8 +291,24 @@ public partial class MainWindow : Window
 
     private void BuildNav()
     {
-        foreach (var section in MainNav.Ordered)
+        var ordered = MainNav.Ordered;
+        for (var i = 0; i < ordered.Count; i++)
         {
+            var section = ordered[i];
+
+            // About is pinned to the bottom of the rail, separated by a
+            // hairline (Windows 11 Settings convention).
+            if (i == ordered.Count - 1)
+            {
+                NavPanel.Children.Add(new Border
+                {
+                    Height = 1,
+                    BorderThickness = new Thickness(0, 1, 0, 0),
+                    BorderBrush = (Brush)FindResource("HandyDivider"),
+                    Margin = new Thickness(16, 8, 16, 4),
+                });
+            }
+
             var captured = section;
             var button = new System.Windows.Controls.Button
             {

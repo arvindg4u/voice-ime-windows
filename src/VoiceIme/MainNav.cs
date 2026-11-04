@@ -11,6 +11,7 @@ public static class MainNav
 {
     public static IReadOnlyList<MainSection> Ordered { get; } = new[]
     {
+        MainSection.Dashboard,
         MainSection.General,
         MainSection.History,
         MainSection.Gemini,
@@ -20,6 +21,7 @@ public static class MainNav
 
     public static string LabelFor(MainSection section) => section switch
     {
+        MainSection.Dashboard => "Dashboard",
         MainSection.General => "General",
         MainSection.History => "History",
         MainSection.Gemini => "Gemini",
@@ -33,6 +35,7 @@ public static class MainNav
 
     public static string IconFor(MainSection section) => section switch
     {
+        MainSection.Dashboard => "🏠",
         MainSection.General => "⚙️",
         MainSection.History => "🕘",
         MainSection.Gemini => "✨",

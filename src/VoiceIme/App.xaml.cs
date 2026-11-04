@@ -1361,7 +1361,8 @@ public partial class App : System.Windows.Application
         SettingsStore settings,
         ClipboardStore clips,
         IHotkeyRegistrar registrar,
-        Func<IReadOnlyList<string>> listMicrophones)
+        Func<IReadOnlyList<string>> listMicrophones,
+        Func<object?>? createDashboardView = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clips);
@@ -1372,7 +1373,8 @@ public partial class App : System.Windows.Application
             () => new Views.GeminiSettingsView(settings),
             () => new Views.HistorySettingsView(clips),
             () => new Views.AdvancedSettingsView(settings),
-            () => new Views.AboutSettingsView(settings));
+            () => new Views.AboutSettingsView(settings),
+            createDashboardView ?? (() => new Views.DashboardView(settings, clips)));
         // Close-to-tray guard: hiding with the icon off strands the app
         // invisible (Task 8 review HIGH). Reads the live store so toggling
         // the setting later takes effect without rebuilding the shell.
@@ -1457,6 +1459,12 @@ public partial class App : System.Windows.Application
             is Views.AboutSettingsView about)
         {
             about.ReloadFromSettings();
+        }
+
+        if (window.SectionView(MainSection.Dashboard)
+            is Views.DashboardView dashboard)
+        {
+            dashboard.RefreshFromStores();
         }
     }
 
