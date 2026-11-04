@@ -105,15 +105,54 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
     /// </summary>
     internal void ReloadFromSettings() => LoadFromSettings();
 
+    /// <summary>Updates the "N keys" hint beside the API-keys box.</summary>
+    private void RefreshKeyCount()
+    {
+        var count = SplitKeys(KeysBox.Text).Count;
+        KeyCountText.Text = count switch
+        {
+            0 => "No keys yet",
+            1 => "1 key",
+            _ => $"{count} keys",
+        };
+        KeyCountText.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            count == 0 ? "WarningText" : "TextMuted");
+    }
+
     private void LoadFromSettings()
     {
         BaseUrlBox.Text = _settings.BaseUrl;
         KeysBox.Text = string.Join('\n', _settings.ApiKeys);
+        RefreshKeyCount();
         ModelBox.Text = _settings.Model;
         RefreshPromptList();
         PromptNameBox.Text = _settings.ActivePrompt;
         PromptBox.Text = _settings.ActivePromptText;
         UpdatePromptHint();
+    }
+
+    /// <summary>
+    /// Writes the inline status line with a severity. Colour is accompanied by
+    /// a glyph so the state does not depend on colour perception alone
+    /// (WCAG 1.4.1) — the previous build rendered "Saved", "Save failed" and
+    /// "Test failed" in the identical grey.
+    /// </summary>
+    private void SetStatus(string message, StatusSeverity severity)
+    {
+        StatusText.Text = message;
+
+        var (glyph, tone) = severity switch
+        {
+            StatusSeverity.Success => (MainNav.Glyphs.Success, "SuccessText"),
+            StatusSeverity.Warning => (MainNav.Glyphs.Warning, "WarningText"),
+            StatusSeverity.Error => (MainNav.Glyphs.Error, "ErrorText"),
+            _ => (string.Empty, "TextMuted"),
+        };
+
+        StatusIcon.Text = glyph;
+        StatusIcon.SetResourceReference(TextBlock.ForegroundProperty, tone);
+        StatusText.SetResourceReference(TextBlock.ForegroundProperty, tone);
     }
 
     private void ResetButton_Click(object sender, RoutedEventArgs e)
@@ -122,6 +161,26 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         // out — only Base URL, model, and prompt reset. Reset clears the
         // library too (SaveNow reseeds Default from the cleared editor when
         // the user actually had text — a branded default is not invented).
+        //
+        // Confirmed, because this destroys saved prompts with no undo. The old
+        // build did it silently on a single click.
+        if (_settings.Prompts.Count > 0)
+        {
+            var confirm = System.Windows.MessageBox.Show(
+                Window.GetWindow(this),
+                $"This will delete your {_settings.Prompts.Count} saved prompt(s) " +
+                "and restore the default base URL, model and prompt.\n\n" +
+                "Your API keys are kept. Continue?",
+                "Reset speech settings",
+                System.Windows.MessageBoxButton.OKCancel,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.Cancel);
+            if (confirm != System.Windows.MessageBoxResult.OK)
+            {
+                return;
+            }
+        }
+
         var defaults = new SettingsStore();
         BaseUrlBox.Text = defaults.BaseUrl;
         ModelBox.Text = defaults.Model;
@@ -145,7 +204,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         var error = ValidatePrompt(prompt);
         if (error is not null)
         {
-            StatusText.Text = error;
+            SetStatus(error, StatusSeverity.Error);
             return false;
         }
 
@@ -159,11 +218,12 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Save failed: {ex.Message}";
+            SetStatus($"Couldn't save: {ex.Message}", StatusSeverity.Error);
             return false;
         }
 
-        StatusText.Text = "Saved ✓";
+        SetStatus("Saved.", StatusSeverity.Success);
+        RefreshKeyCount();
         RefreshPromptList();
         return true;
     }
@@ -188,11 +248,11 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
                 ModelBox.Text.Trim(),
                 PromptBox.Text.Trim(),
                 _settings.SmartMode);
-            StatusText.Text = $"Test OK — transcript: {transcript}";
+            SetStatus($"Connection works. Heard: \u201c{transcript}\u201d", StatusSeverity.Success);
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Test failed: {ex.Message}";
+            SetStatus($"Test failed: {ex.Message}", StatusSeverity.Error);
         }
         finally
         {
@@ -209,7 +269,7 @@ public partial class GeminiSettingsView : System.Windows.Controls.UserControl
         IsPromptOverLimit = length > MaxPromptLength;
         PromptHint.SetResourceReference(
             TextBlock.ForegroundProperty,
-            IsPromptOverLimit ? "HandyError" : "HandyMidGray");
+            IsPromptOverLimit ? "ErrorText" : "TextMuted");
     }
 
     /// <summary>

@@ -23,8 +23,8 @@ namespace VoiceIme.Views;
 public partial class HistorySettingsView : System.Windows.Controls.UserControl
 {
     internal const int PreviewLength = 80;
-    internal const string RedictateHint = "Audio isn't kept — press your dictation hotkey and speak again.";
-    private const string CopiedHint = "Copied to clipboard ✓";
+    internal const string RedictateHint = "Audio isn't kept, so retry means dictating again.";
+    private const string CopiedHint = "Copied to clipboard.";
     private const string UnknownError = "Transcription failed (details weren't kept).";
 
     private ClipboardStore _store;
@@ -59,13 +59,41 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     internal string HintMessage => HintText.Text;
 
     /// <summary>
+    /// Writes the footer hint with a severity, adding a glyph so success and
+    /// failure are distinguishable without relying on colour (WCAG 1.4.1).
+    /// </summary>
+    private void SetHint(string message, StatusSeverity severity = StatusSeverity.Neutral)
+    {
+        HintText.Text = message;
+
+        var (glyph, tone) = severity switch
+        {
+            StatusSeverity.Success => (MainNav.Glyphs.Success, "SuccessText"),
+            StatusSeverity.Warning => (MainNav.Glyphs.Warning, "WarningText"),
+            StatusSeverity.Error => (MainNav.Glyphs.Error, "ErrorText"),
+            _ => (string.Empty, "TextMuted"),
+        };
+
+        HintIcon.Text = glyph;
+        HintIcon.SetResourceReference(TextBlock.ForegroundProperty, tone);
+        HintText.SetResourceReference(TextBlock.ForegroundProperty, tone);
+    }
+
+    private static bool Confirm(string message, string title) =>
+        System.Windows.MessageBox.Show(
+            message, title,
+            System.Windows.MessageBoxButton.OKCancel,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.Cancel) == System.Windows.MessageBoxResult.OK;
+
+    /// <summary>
     /// The shared <see cref="ClipboardStore"/> this view renders — the F2
     /// shared-instance wiring asserts the app's live store lands here.
     /// </summary>
     internal ClipboardStore BoundStore => _store;
 
-    /// <summary>Test seam: whether the empty-history message is shown.</summary>
-    internal bool IsEmptyVisible => EmptyText.Visibility == Visibility.Visible;
+    /// <summary>Test seam: whether the empty-history state is shown.</summary>
+    internal bool IsEmptyVisible => EmptyState.Visibility == Visibility.Visible;
 
     /// <summary>
     /// Points the view at the app's live <see cref="ClipboardStore"/> (which
@@ -92,11 +120,14 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     }
 
     /// <summary>
-    /// Pure helper: card opacity by row state — failed/empty rows render
-    /// muted, matching Handy's reduced-emphasis failed rows. Unit-testable
-    /// on any OS — no WPF types involved.
+    /// Legacy helper, retained so the row record keeps a stable shape.
+    ///
+    /// Failed rows used to render at 0.6 opacity, which pushed their text below
+    /// the contrast floor — dimming is not an acceptable way to signal state.
+    /// Failure is now shown by a red "Failed" chip plus an error icon, so every
+    /// row renders at full strength.
     /// </summary>
-    internal static double CardOpacityForRow(bool failed) => failed ? 0.6 : 1.0;
+    internal static double CardOpacityForRow(bool failed) => 1.0;
 
     /// <summary>
     /// Pure helper: compact display label — pin prefix, HH:mm stamp, and text
@@ -127,11 +158,11 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         {
             _copyText(entry.Text);
             _copiedId = id;
-            HintText.Text = CopiedHint;
+            SetHint(CopiedHint, StatusSeverity.Success);
         }
         catch (Exception ex)
         {
-            HintText.Text = $"Copy failed: {ex.Message}";
+            SetHint($"Couldn't copy: {ex.Message}", StatusSeverity.Error);
         }
 
         Refresh();
@@ -160,7 +191,7 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     {
         if (_store.Entries.Any(e => e.Id == id))
         {
-            HintText.Text = RedictateHint;
+            SetHint(RedictateHint);
         }
     }
 
@@ -169,7 +200,7 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
     {
         _store.ClearUnpinned();
         Refresh();
-        HintText.Text = "Unpinned entries cleared.";
+        SetHint("Unpinned entries cleared.", StatusSeverity.Success);
     }
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
@@ -190,7 +221,8 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
 
     private void DeleteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.Button { Tag: Guid id })
+        if (sender is System.Windows.Controls.Button { Tag: Guid id } &&
+            Confirm("Delete this transcript? This cannot be undone.", "Delete transcript"))
         {
             DeleteEntry(id);
         }
@@ -204,7 +236,21 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         }
     }
 
-    private void ClearButton_Click(object sender, RoutedEventArgs e) => ClearUnpinnedEntries();
+    private void ClearButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_store.Entries.Count(e => !e.Pinned) == 0)
+        {
+            return;
+        }
+
+        if (Confirm(
+                "Delete every unpinned transcript? Pinned entries are kept. " +
+                "This cannot be undone.",
+                "Clear history"))
+        {
+            ClearUnpinnedEntries();
+        }
+    }
 
     private void OpenFolderButton_Click(object sender, RoutedEventArgs e)
     {
@@ -214,7 +260,7 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         }
         catch (Exception ex)
         {
-            HintText.Text = $"Couldn't open the data folder: {ex.Message}";
+            SetHint($"Couldn't open the data folder: {ex.Message}", StatusSeverity.Error);
         }
     }
 
@@ -230,8 +276,12 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         _rows.AddRange(_store.Entries.Select(ToRow));
         EntriesList.ItemsSource = _rows.ToArray();
         var empty = _rows.Count == 0;
-        EmptyText.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        EmptyState.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         EntriesList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        ClearButton.IsEnabled = !empty;
+        CountText.Text = empty
+            ? "Transcripts stay on this PC."
+            : $"{_rows.Count} transcript{(_rows.Count == 1 ? string.Empty : "s")} \u00b7 kept on this PC";
     }
 
     private HistoryRow ToRow(ClipboardEntry entry)
@@ -249,9 +299,9 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
             failed ? Visibility.Collapsed : Visibility.Visible,
             failed ? body : string.Empty,
             failed ? Visibility.Visible : Visibility.Collapsed,
-            _copiedId == entry.Id ? "✓" : "⧉",
+            _copiedId == entry.Id ? MainNav.Glyphs.Success : MainNav.Glyphs.Copy,
             failed ? Visibility.Collapsed : Visibility.Visible,
-            entry.Pinned ? "★" : "☆",
+            entry.Pinned ? MainNav.Glyphs.Unpin : MainNav.Glyphs.Pin,
             entry.Pinned ? "Unpin" : "Pin",
             failed ? Visibility.Visible : Visibility.Collapsed,
             FormatEntryLabel(entry.Pinned, time, body));
@@ -299,5 +349,16 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         string PinGlyph,
         string PinTip,
         Visibility RetryVisibility,
-        string CompactLabel);
+        string CompactLabel)
+    {
+        /// <summary>Accessible name for the pin action — the glyph alone is not a label.</summary>
+        public string PinActionName => PinTip.StartsWith("Unpin", StringComparison.OrdinalIgnoreCase)
+            ? "Unpin this transcript"
+            : "Pin this transcript so it is never cleared";
+
+        /// <summary>Visible verb beside the pin glyph.</summary>
+        public string PinActionLabel => PinTip.StartsWith("Unpin", StringComparison.OrdinalIgnoreCase)
+            ? "Unpin"
+            : "Pin";
+    }
 }

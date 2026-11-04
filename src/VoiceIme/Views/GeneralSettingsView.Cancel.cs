@@ -42,7 +42,7 @@ public partial class GeneralSettingsView
         CancelHotkeyError.Visibility = Visibility.Collapsed;
     }
 
-    private void CancelHotkeyChip_Click(object sender, MouseButtonEventArgs e)
+    private void CancelHotkeyChip_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         StartCapture(CaptureTarget.Cancel);

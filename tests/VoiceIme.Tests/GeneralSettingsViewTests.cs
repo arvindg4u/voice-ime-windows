@@ -25,7 +25,6 @@ public sealed class GeneralSettingsViewTests
             Assert.Equal(3, view.ActivationItemCount);
             Assert.Equal("Toggle", view.SelectedActivationLabel);
             Assert.Equal("System default", view.SelectedMicrophone);
-            Assert.False(view.MuteChecked == true);
             Assert.False(view.IsHotkeyErrorVisible);
         });
     }
@@ -186,88 +185,12 @@ public sealed class GeneralSettingsViewTests
     {
         TryRunOnSta(new SettingsStore(), new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
         {
-            Assert.Equal(3, view.ChannelItemCount);
-            Assert.Equal("Mono", view.SelectedChannelLabel);
-            Assert.Equal(1, view.OutputItemCount);
-            Assert.Equal("System default", view.SelectedOutput);
             Assert.Equal(100, view.VolumePercent);
             Assert.Equal("100%", view.VolumeLabelText);
             Assert.False(view.FeedbackChecked == true);
             Assert.Equal(SettingsStore.DefaultCancelHotkey, view.CancelHotkeyLabel);
             Assert.False(view.IsCancelHotkeyErrorVisible);
         });
-    }
-
-    [Fact]
-    public void ApplyChannel_Success_PersistsAndSaves()
-    {
-        var store = new SettingsStore();
-        var saves = 0;
-        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
-        {
-            view.ApplyChannel("Stereo");
-
-            Assert.Equal(AudioChannels.Stereo, store.Channel);
-            Assert.Equal("Stereo", view.SelectedChannelLabel);
-            Assert.Equal(1, saves);
-        }, saver: _ => saves++);
-    }
-
-    [Fact]
-    public void ApplyChannel_UnknownLabel_CoercesToMono()
-    {
-        var store = new SettingsStore { Channel = AudioChannels.Stereo };
-        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
-        {
-            view.ApplyChannel("Surround 7.1");
-
-            Assert.Equal(AudioChannels.Mono, store.Channel);
-            Assert.Equal("Mono", view.SelectedChannelLabel);
-        });
-    }
-
-    [Fact]
-    public void OutputList_KnownDevice_SelectsStored()
-    {
-        var store = new SettingsStore { OutputDevice = "Speakers" };
-        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
-        {
-            Assert.Equal("Speakers", view.SelectedOutput);
-        }, outputs: new[] { "Speakers" });
-    }
-
-    [Fact]
-    public void OutputList_UnpluggedDevice_ShowsUnavailableEntry()
-    {
-        var store = new SettingsStore { OutputDevice = "Gone Speakers" };
-        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
-        {
-            Assert.Equal("Gone Speakers (unavailable)", view.SelectedOutput);
-        }, outputs: new[] { "Other Speakers" });
-    }
-
-    [Fact]
-    public void ApplyOutputDevice_SystemDefault_ClearsStored()
-    {
-        var store = new SettingsStore { OutputDevice = "Speakers" };
-        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
-        {
-            view.ApplyOutputDevice(OutputDevices.SystemDefaultLabel);
-
-            Assert.Equal("", store.OutputDevice);
-        }, outputs: new[] { "Speakers" });
-    }
-
-    [Fact]
-    public void ApplyOutputDevice_Unavailable_IgnoredKeepsStored()
-    {
-        var store = new SettingsStore { OutputDevice = "Gone Speakers" };
-        TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
-        {
-            view.ApplyOutputDevice("Gone Speakers (unavailable)");
-
-            Assert.Equal("Gone Speakers", store.OutputDevice);
-        }, outputs: new[] { "Other Speakers" });
     }
 
     [Fact]
@@ -422,13 +345,11 @@ public sealed class GeneralSettingsViewTests
         var store = new SettingsStore();
         TryRunOnSta(store, new NullHotkeyRegistrar(), Array.Empty<string>(), view =>
         {
-            store.Channel = AudioChannels.Stereo;
             store.Volume = 42;
             store.AudioFeedback = true;
             store.CancelHotkey = "F5";
             view.ReloadFromSettings();
 
-            Assert.Equal("Stereo", view.SelectedChannelLabel);
             Assert.Equal(42, view.VolumePercent);
             Assert.Equal("42%", view.VolumeLabelText);
             Assert.True(view.FeedbackChecked == true);

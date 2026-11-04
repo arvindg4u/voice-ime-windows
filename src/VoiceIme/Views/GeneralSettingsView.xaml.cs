@@ -11,10 +11,9 @@ using System.Windows.Media;
 namespace VoiceIme.Views;
 
 /// <summary>
-/// General section screen (Handy GeneralSettings port): dictation-hotkey
-/// capture chip, activation-mode dropdown, the Sound group (microphone
-/// picker, mute toggle, speaker test, channel picker, output picker, volume
-/// slider, feedback toggle), and the cancel-key capture row. Viewmodel-less
+/// General section screen: dictation-hotkey capture, activation mode,
+/// cancel key, and the audio group (microphone picker, live mic-level test,
+/// meter sensitivity, speaker test, sound-on-insert). Viewmodel-less
 /// code-behind bound to <see cref="SettingsStore"/> — every write
 /// validates-then-commits and surfaces failures inline, never throws out of
 /// an event handler. Hosted by <see cref="MainWindow"/> via
@@ -95,9 +94,6 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
     /// <summary>Test seam: selected microphone item.</summary>
     internal string? SelectedMicrophone => MicBox.SelectedItem as string;
 
-    /// <summary>Test seam: mute toggle state.</summary>
-    internal bool? MuteChecked => MuteCheck.IsChecked;
-
     /// <summary>
     /// Re-reads the bound store into the controls (see
     /// <see cref="GeminiSettingsView.ReloadFromSettings"/> — same shared-store
@@ -118,14 +114,13 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
         RefreshMicrophoneList();
 
-        MuteCheck.IsChecked = _settings.MuteWhileRecording;
         RefreshSoundGroup();
         RefreshCancelRow();
     }
 
     // Hotkey capture (Handy GlobalShortcutInput port).
 
-    private void HotkeyChip_Click(object sender, MouseButtonEventArgs e)
+    private void HotkeyChip_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         StartCapture(CaptureTarget.Hotkey);
@@ -173,12 +168,12 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
         if (target == CaptureTarget.Cancel)
         {
-            CancelHotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyAccent");
+            CancelHotkeyChip.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "FocusRing");
             BeginCancelCapture();
         }
         else
         {
-            HotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyAccent");
+            HotkeyChip.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "FocusRing");
             HotkeyText.Text = "press keys…";
             ClearHotkeyError();
         }
@@ -331,8 +326,8 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         }
 
         _heldKeys.Clear();
-        HotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyCardBorder");
-        CancelHotkeyChip.SetResourceReference(Border.BorderBrushProperty, "HandyCardBorder");
+        HotkeyChip.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "BorderStrong");
+        CancelHotkeyChip.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "BorderStrong");
         RefreshHotkeyChip();
         RefreshCancelRow();
     }
@@ -517,12 +512,6 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         }
 
         _settings.Microphone = selected == MicrophoneDevices.SystemDefaultLabel ? "" : selected;
-        TrySaveSettings(out _);
-    }
-
-    private void MuteCheck_Click(object sender, RoutedEventArgs e)
-    {
-        _settings.MuteWhileRecording = MuteCheck.IsChecked == true;
         TrySaveSettings(out _);
     }
 

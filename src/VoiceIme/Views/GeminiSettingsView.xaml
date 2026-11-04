@@ -1,111 +1,234 @@
 <UserControl x:Class="VoiceIme.Views.GeminiSettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Focusable="True">
-    <!-- Gemini section (Handy post-processing API group port): Handy's
-         provider/model pickers are replaced by our fixed Gemini fields —
-         stacked Base URL, API keys, and Model with reset-to-defaults, then
-         the custom-prompt group (multi-line editor, char-count hint, tip),
-         then the Test/Save footer with inline status. All brushes and styles
-         resolve from Theme/HandyTheme.xaml via DynamicResource. Hosted by
-         MainWindow through RegisterSectionView(MainSection.Gemini, view). -->
+             Focusable="False">
+
+    <!--
+      Speech (transcription provider).
+
+      Layout fixes over the first port:
+
+      • One row grammar, matching General/Advanced/About. This screen alone used
+        stacked "label above field" while every other screen used label-left /
+        control-right, so the same app had two different row metaphors.
+      • Two "Save" buttons became one. Previously "Save" (API fields) and
+        "Save" (named prompt) sat on the same screen and did different things.
+      • The API keys field is monospaced, masked-capable and reports how many
+        keys it holds, instead of being an unlabelled `<TextBox>`.
+      • Reset is confirmed, because it silently wiped the whole prompt library.
+      • Status is a severity-coloured inline message next to the actions, not a
+        bare grey line at the bottom of the scroll region.
+    -->
+
+    <UserControl.Resources>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{DynamicResource UiFontFamily}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style x:Key="FieldHelp" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{DynamicResource UiFontFamily}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+        <Style x:Key="Row" TargetType="Grid">
+            <Setter Property="MinHeight" Value="56" />
+        </Style>
+    </UserControl.Resources>
+
     <StackPanel>
-        <TextBlock Text="GEMINI API" Style="{DynamicResource HandyGroupHeader}" Margin="0,0,0,8" />
-        <Border Style="{DynamicResource HandySettingCard}">
+
+        <!-- ==================== CONNECTION ==================== -->
+        <TextBlock Text="CONNECTION" Style="{DynamicResource GroupHeader}" Margin="0,0,0,8" />
+
+        <Border Style="{DynamicResource Card}">
             <StackPanel>
-                <TextBlock Text="Base URL" FontWeight="SemiBold" FontSize="13"
-                           Foreground="{DynamicResource HandyText}" />
-                <TextBox x:Name="BaseUrlBox" Margin="0,4,0,12"
-                         Style="{DynamicResource HandyTextBox}" />
 
-                <TextBlock Text="API keys" FontWeight="SemiBold" FontSize="13"
-                           Foreground="{DynamicResource HandyText}" />
-                <TextBlock Text="One per line — auto-rotates on rate limit."
-                           FontSize="12" Foreground="{DynamicResource HandyMidGray}"
-                           TextWrapping="Wrap" />
-                <TextBox x:Name="KeysBox" Margin="0,4,0,12" Height="90"
-                         AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
-                         FontFamily="Consolas"
-                         Style="{DynamicResource HandyTextBox}" />
+                <!-- API keys -->
+                <StackPanel Margin="0,0,0,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="API keys" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Style="{StaticResource FieldHelp}"
+                                       Text="One per line. Keys rotate automatically when one is rate-limited." />
+                        </StackPanel>
+                        <TextBlock x:Name="KeyCountText" Grid.Column="1" VerticalAlignment="Bottom"
+                                   FontFamily="{DynamicResource UiFontFamily}" FontSize="12"
+                                   Foreground="{DynamicResource TextMuted}" Text="" />
+                    </Grid>
+                    <TextBox x:Name="KeysBox" Margin="0,6,0,0" Height="92"
+                             AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
+                             FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                             Style="{DynamicResource InputTextBox}"
+                             AutomationProperties.Name="Gemini API keys, one per line"
+                             AutomationProperties.HelpText="Keys are encrypted on this PC with your Windows account." />
+                    <TextBlock Style="{StaticResource FieldHelp}"
+                               Text="Stored encrypted with Windows DPAPI and never written to logs." />
+                </StackPanel>
 
-                <TextBlock Text="Model" FontWeight="SemiBold" FontSize="13"
-                           Foreground="{DynamicResource HandyText}" />
-                <TextBox x:Name="ModelBox" Margin="0,4,0,8"
-                         Style="{DynamicResource HandyTextBox}" />
-                <Button x:Name="ResetButton" Content="Reset to defaults"
-                        HorizontalAlignment="Left" Padding="12,4"
-                        Style="{DynamicResource HandySecondaryButton}"
-                        ToolTip="Restore the default Base URL, model, and prompt (keys are kept)"
-                        Click="ResetButton_Click" />
+                <!-- Model -->
+                <Grid Style="{StaticResource Row}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="Model" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Style="{StaticResource FieldHelp}"
+                                   Text="The Gemini model used for transcription." />
+                    </StackPanel>
+                    <TextBox x:Name="ModelBox" Grid.Column="1" Width="240"
+                             VerticalAlignment="Center"
+                             Style="{DynamicResource InputTextBox}"
+                             AutomationProperties.Name="Transcription model" />
+                </Grid>
+
+                <!-- Base URL (advanced-ish, but part of the connection) -->
+                <Grid Style="{StaticResource Row}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="Base URL" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Style="{StaticResource FieldHelp}"
+                                   Text="Only change this if you route through a proxy." />
+                    </StackPanel>
+                    <TextBox x:Name="BaseUrlBox" Grid.Column="1" Width="240"
+                             VerticalAlignment="Center"
+                             Style="{DynamicResource InputTextBox}"
+                             AutomationProperties.Name="API base URL" />
+                </Grid>
             </StackPanel>
         </Border>
 
-        <TextBlock Text="PROMPT LIBRARY" Style="{DynamicResource HandyGroupHeader}" />
-        <Border Style="{DynamicResource HandySettingCard}">
+        <!-- ==================== CUSTOM PROMPT ==================== -->
+        <TextBlock Text="CUSTOM PROMPT" Style="{DynamicResource GroupHeader}" />
+
+        <Border Style="{DynamicResource Card}">
             <StackPanel>
-                <DockPanel Style="{DynamicResource HandySettingRow}">
-                    <ComboBox x:Name="PromptSelector" DockPanel.Dock="Right" MinWidth="200"
-                              VerticalAlignment="Center" HorizontalAlignment="Right"
-                              FontSize="13" Foreground="{DynamicResource HandyText}"
-                              FontFamily="{DynamicResource HandyFontFamily}"
-                              ToolTip="Saved prompts — picking one loads it into the editor"
+
+                <!-- Named prompts -->
+                <Grid Style="{StaticResource Row}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="Saved prompt" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Style="{StaticResource FieldHelp}"
+                                   Text="Pick a saved prompt to load it into the editor." />
+                    </StackPanel>
+                    <ComboBox x:Name="PromptSelector" Grid.Column="1" Width="240"
+                              VerticalAlignment="Center"
+                              Style="{DynamicResource InputComboBox}"
+                              AutomationProperties.Name="Saved prompt"
                               SelectionChanged="PromptSelector_SelectionChanged" />
-                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                        <TextBlock Text="Saved prompt" FontWeight="SemiBold" FontSize="13"
-                                   Foreground="{DynamicResource HandyText}" />
-                        <TextBlock Text="Pick a saved prompt to edit it below."
-                                   FontSize="12" Foreground="{DynamicResource HandyMidGray}"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
-                </DockPanel>
-                <DockPanel Style="{DynamicResource HandySettingRow}">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
-                                VerticalAlignment="Center" HorizontalAlignment="Right">
-                        <Button x:Name="SavePromptButton" Content="Save" Width="72"
-                                Style="{DynamicResource HandyPrimaryButton}"
-                                ToolTip="Save the editor text under this name (updates the prompt if it exists)"
-                                Click="SavePromptButton_Click" />
-                        <Button x:Name="DeletePromptButton" Content="Delete" Width="72" Margin="8,0,0,0"
-                                Style="{DynamicResource HandySecondaryButton}"
-                                ToolTip="Delete the selected saved prompt"
-                                Click="DeletePromptButton_Click" />
-                    </StackPanel>
-                    <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                        <TextBlock Text="Name" FontWeight="SemiBold" FontSize="13"
-                                   Foreground="{DynamicResource HandyText}" />
-                        <TextBox x:Name="PromptNameBox" Margin="0,4,0,0" MinWidth="200"
-                                 Style="{DynamicResource HandyTextBox}"
-                                 ToolTip="Prompt name (max 60 chars)" />
-                    </StackPanel>
-                </DockPanel>
-                <TextBlock Text="Active prompt text (max 2000 chars, blank to disable)"
-                           FontWeight="SemiBold" FontSize="13"
-                           Foreground="{DynamicResource HandyText}" />
-                <TextBox x:Name="PromptBox" Margin="0,4,0,4" MinHeight="100"
-                         AcceptsReturn="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto"
-                         Style="{DynamicResource HandyTextBox}"
-                         TextChanged="PromptBox_TextChanged" />
-                <TextBlock x:Name="PromptHint" FontSize="12"
-                           HorizontalAlignment="Right"
-                           Foreground="{DynamicResource HandyMidGray}"
-                           Text="0/2000 characters" />
-                <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap"
-                           Foreground="{DynamicResource HandyMidGray}"
-                           Text="Tip: blank disables the custom prompt. Otherwise the text is sent as the system instruction with every transcription." />
+                </Grid>
+
+                <Border Style="{DynamicResource Divider}" />
+
+                <StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="Prompt name" Style="{StaticResource FieldLabel}" />
+                    <TextBlock Style="{StaticResource FieldHelp}"
+                               Text="Up to 60 characters. Saving under an existing name updates it." />
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="PromptNameBox" Grid.Column="0"
+                                 Style="{DynamicResource InputTextBox}"
+                                 AutomationProperties.Name="Prompt name" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                    VerticalAlignment="Center" Margin="8,0,0,0">
+                            <Button x:Name="SavePromptButton" Content="Save prompt"
+                                    Style="{DynamicResource SecondaryButton}"
+                                    AutomationProperties.Name="Save prompt under this name"
+                                    Click="SavePromptButton_Click" />
+                            <Button x:Name="DeletePromptButton" Content="Delete" Margin="8,0,0,0"
+                                    Style="{DynamicResource SecondaryButton}"
+                                    AutomationProperties.Name="Delete the selected saved prompt"
+                                    Click="DeletePromptButton_Click" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Margin="0,12,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Prompt text" Style="{StaticResource FieldLabel}" />
+                            <TextBlock Style="{StaticResource FieldHelp}"
+                                       Text="Sent as the system instruction with every transcription. Leave blank to disable." />
+                        </StackPanel>
+                        <TextBlock x:Name="PromptHint" Grid.Column="1" VerticalAlignment="Bottom"
+                                   FontFamily="{DynamicResource UiFontFamily}" FontSize="12"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   Text="0/2000 characters"
+                                   AutomationProperties.LiveSetting="Polite" />
+                    </Grid>
+                    <TextBox x:Name="PromptBox" Margin="0,6,0,0" MinHeight="104"
+                             AcceptsReturn="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Style="{DynamicResource InputTextBox}"
+                             AutomationProperties.Name="Custom prompt text"
+                             TextChanged="PromptBox_TextChanged" />
+                </StackPanel>
             </StackPanel>
         </Border>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="TestButton" Content="Test" Width="90" Margin="0,0,8,0"
-                    Style="{DynamicResource HandyPrimaryButton}"
-                    ToolTip="Send a test tone through the full pipeline"
-                    Click="TestButton_Click" />
-            <Button x:Name="SaveButton" Content="Save" Width="90" IsDefault="True"
-                    Style="{DynamicResource HandySecondaryButton}"
-                    Click="SaveButton_Click" />
-        </StackPanel>
-        <TextBlock x:Name="StatusText" Margin="0,12,0,0" TextWrapping="Wrap"
-                   Foreground="{DynamicResource HandyMidGray}" />
+        <!-- ==================== ACTIONS ==================== -->
+        <Border Style="{DynamicResource Card}" Margin="0,4,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Status sits beside the buttons so feedback appears where the
+                     user's eye already is when they click. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="StatusIcon" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Foreground="{DynamicResource TextMuted}" Text="" />
+                    <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+                               FontFamily="{DynamicResource UiFontFamily}" FontSize="12"
+                               TextWrapping="Wrap" MaxWidth="360"
+                               Foreground="{DynamicResource TextMuted}" Text=""
+                               AutomationProperties.LiveSetting="Polite" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ResetButton" Content="Reset"
+                            Style="{DynamicResource SecondaryButton}" Margin="0,0,8,0"
+                            AutomationProperties.Name="Reset connection, model and prompt to defaults"
+                            ToolTip="Restore the default base URL, model and prompt. Your API keys are kept."
+                            Click="ResetButton_Click" />
+                    <Button x:Name="TestButton" Content="Test connection"
+                            Style="{DynamicResource SecondaryButton}" Margin="0,0,8,0"
+                            AutomationProperties.Name="Test the transcription connection"
+                            ToolTip="Sends a short tone through the full transcription pipeline"
+                            Click="TestButton_Click" />
+                    <Button x:Name="SaveButton" Content="Save"
+                            Style="{DynamicResource PrimaryButton}" IsDefault="True"
+                            AutomationProperties.Name="Save connection settings"
+                            Click="SaveButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TextBlock Style="{DynamicResource StatusText}" Margin="4,10,0,0"
+                   Text="Changes here are saved only when you press Save." />
     </StackPanel>
 </UserControl>

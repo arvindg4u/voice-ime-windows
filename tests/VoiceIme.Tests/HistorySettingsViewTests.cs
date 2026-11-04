@@ -62,9 +62,11 @@ public sealed class HistorySettingsViewTests : IDisposable
     }
 
     [Fact]
-    public void CardOpacityForRow_Failed_IsMuted()
+    public void CardOpacityForRow_IsAlwaysFull_StateIsShownByMarkersNotDimming()
     {
-        Assert.Equal(0.6, HistorySettingsView.CardOpacityForRow(true));
+        // Dimming failed rows pushed their text below the contrast floor.
+        // Failure is now a red chip + icon, so every row renders at full strength.
+        Assert.Equal(1.0, HistorySettingsView.CardOpacityForRow(true));
     }
 
     [Fact]
@@ -116,7 +118,7 @@ public sealed class HistorySettingsViewTests : IDisposable
 
                 Assert.Equal("say this", copied);
                 Assert.Equal("✓", view.Rows[0].CopyGlyph);
-                Assert.Equal("Copied to clipboard ✓", view.HintMessage);
+                Assert.Equal("Copied to clipboard.", view.HintMessage);
             },
             onCopy: text => copied = text);
     }
@@ -210,7 +212,7 @@ public sealed class HistorySettingsViewTests : IDisposable
             view.AttachError(view.Rows[0].Id, "quota exhausted");
 
             var row = Assert.Single(view.Rows);
-            Assert.Equal(0.6, row.CardOpacity);
+            Assert.Equal(1.0, row.CardOpacity);
             Assert.Equal("quota exhausted", row.Error);
             Assert.Equal(string.Empty, row.Body);
         });
