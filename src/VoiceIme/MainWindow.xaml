@@ -70,7 +70,7 @@
                                Foreground="{DynamicResource HandyText}" />
                     <TextBlock Text="Dictation for Windows" FontSize="11"
                                Foreground="{DynamicResource HandyTextSecondary}"
-                               CharacterSpacing="1" Margin="0,4,0,0" />
+                               Margin="0,4,0,0" />
                 </StackPanel>
                 <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource HandyDivider}"
                         Margin="16,4,16,8" />
