@@ -61,6 +61,11 @@
                                         Tag="{Binding Id}" ToolTip="Copy to clipboard"
                                         Visibility="{Binding CopyVisibility}"
                                         Click="CopyButton_Click" />
+                                <Button Content="{Binding RePasteGlyph}" Padding="10,6" Margin="0,0,8,0"
+                                        Style="{DynamicResource HandySecondaryButton}"
+                                        Tag="{Binding Id}" ToolTip="Paste this transcript into the focused window again"
+                                        Visibility="{Binding RePasteVisibility}"
+                                        Click="RePasteButton_Click" />
                                 <Button Content="{Binding PinGlyph}" Padding="10,6" Margin="0,0,8,0"
                                         Style="{DynamicResource HandySecondaryButton}"
                                         Tag="{Binding Id}" ToolTip="{Binding PinTip}"

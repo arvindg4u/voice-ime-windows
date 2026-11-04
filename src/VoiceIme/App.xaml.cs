@@ -1305,6 +1305,43 @@ public partial class App : System.Windows.Application
             advanced.Saved -= ApplyAdvancedSave;
             advanced.Saved += ApplyAdvancedSave;
         }
+
+        // Re-paste from History: lets the user re-attempt paste of a
+        // previously captured transcript into the focused window. This is
+        // the recovery path when the original paste failed (transcript kept
+        // in History).
+        if (window.SectionView(MainSection.History)
+            is Views.HistorySettingsView history)
+        {
+            history.RePasteRequested -= OnHistoryRePasteRequested;
+            history.RePasteRequested += OnHistoryRePasteRequested;
+        }
+    }
+
+    /// <summary>
+    /// Handles a user request to re-paste a history entry into the focused
+    /// window. Runs outside the dictation session, so it shows results via
+    /// notifier + tray rather than the full error state machine.
+    /// </summary>
+    private void OnHistoryRePasteRequested(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        try
+        {
+            NativeInput.PasteIntoFocusedWindow(text, _settings.PasteMethod);
+            SetTray("Voice IME — pasted ✓");
+            SoundFeedback.PlayPostPasteTone(_settings);
+            _notifier.Notify("Voice IME", "Pasted into the focused window.",
+                NotificationSeverity.Info, secrets: _settings.ApiKeys);
+        }
+        catch (Exception ex)
+        {
+            var message = ex.Message;
+            _notifier.Notify("Voice IME", message,
+                NotificationSeverity.Error, secrets: _settings.ApiKeys);
+            SetTray(message);
+            Logger.Error($"re-paste failed: {ex.GetType().Name}");
+        }
     }
 
     /// <summary>

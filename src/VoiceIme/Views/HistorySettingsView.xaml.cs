@@ -180,6 +180,36 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         }
     }
 
+    private void RePasteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: Guid id })
+        {
+            RePasteEntry(id);
+        }
+    }
+
+    /// <summary>
+    /// Test seam (internal): attempts to paste the entry's transcript into
+    /// the focused window again. Raises <see cref="RePasteRequested"/> so
+    /// the app can perform the actual paste (it needs the live window
+    /// context). Returns false when the entry has no text.
+    /// </summary>
+    internal bool RePasteEntry(Guid id)
+    {
+        var entry = _store.Entries.FirstOrDefault(e => e.Id == id);
+        if (entry is null || string.IsNullOrWhiteSpace(entry.Text))
+        {
+            return false;
+        }
+
+        RePasteRequested?.Invoke(entry.Text);
+        HintText.Text = "Pasting…";
+        return true;
+    }
+
+    /// <summary>Raised when the user asks to re-paste a history entry.</summary>
+    internal event Action<string>? RePasteRequested;
+
     private void PinButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is System.Windows.Controls.Button { Tag: Guid id })
@@ -251,6 +281,8 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
             failed ? Visibility.Visible : Visibility.Collapsed,
             _copiedId == entry.Id ? "✓" : "⧉",
             failed ? Visibility.Collapsed : Visibility.Visible,
+            "⟳",
+            failed ? Visibility.Collapsed : Visibility.Visible,
             entry.Pinned ? "★" : "☆",
             entry.Pinned ? "Unpin" : "Pin",
             failed ? Visibility.Visible : Visibility.Collapsed,
@@ -296,6 +328,8 @@ public partial class HistorySettingsView : System.Windows.Controls.UserControl
         Visibility ErrorVisibility,
         string CopyGlyph,
         Visibility CopyVisibility,
+        string RePasteGlyph,
+        Visibility RePasteVisibility,
         string PinGlyph,
         string PinTip,
         Visibility RetryVisibility,

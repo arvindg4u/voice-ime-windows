@@ -76,23 +76,68 @@ public static class NativeInput
 
         try
         {
-            System.Windows.Forms.Clipboard.SetText(text);
+            // The clipboard is a shared system resource: another app may
+            // briefly hold it open. Retry transient failures instead of
+            // failing the whole dictation on the first attempt.
+            SetClipboardTextWithRetry(text);
         }
-        catch (Exception ex)
+        catch (ExternalException ex)
         {
-            throw new IOException("Couldn't access the clipboard — try again", ex);
+            throw new IOException("Couldn't access the clipboard — another app may have it open. Transcript kept in History.", ex);
         }
 
         // Give the clipboard a beat to settle before the keystroke lands.
         Thread.Sleep(50);
-        SendChord(PasteChords.ForMethod(method));
+        try
+        {
+            SendChord(PasteChords.ForMethod(method));
+        }
+        catch (IOException)
+        {
+            // Restore clipboard before rethrowing so the user can still
+            // paste manually from History.
+            RestoreClipboard(previous);
+            throw new IOException("Couldn't send keystrokes to the focused window — if it runs as Administrator, run Voice IME as Administrator too. Transcript kept in History.");
+        }
 
         // Restore what the user had (best-effort, never throws).
-        if (previous is not null)
+        RestoreClipboard(previous);
+    }
+
+    /// <summary>
+    /// Writes text to the clipboard with retries for transient locks
+    /// (<see cref="ExternalException"/> / CLIPBRD_E_CANT_OPEN). Never throws
+    /// out of the caller — the caller decides how to surface failure.
+    /// </summary>
+    private static void SetClipboardTextWithRetry(string text, int maxRetries = 3, int delayMs = 100)
+    {
+        ExternalException? last = null;
+        for (var i = 0; i < maxRetries; i++)
         {
-            Thread.Sleep(150);
-            try { System.Windows.Forms.Clipboard.SetDataObject(previous, copy: true); } catch { /* ignore */ }
+            try
+            {
+                System.Windows.Forms.Clipboard.SetText(text);
+                return;
+            }
+            catch (ExternalException ex)
+            {
+                last = ex;
+                if (i < maxRetries - 1)
+                    Thread.Sleep(delayMs);
+            }
         }
+
+        // Exhausted retries: surface as ExternalException so the caller can
+        // distinguish clipboard failure from keystroke failure.
+        throw last!;
+    }
+
+    /// <summary>Best-effort clipboard restore; never throws.</summary>
+    private static void RestoreClipboard(System.Windows.Forms.IDataObject? previous)
+    {
+        if (previous is null) return;
+        Thread.Sleep(150);
+        try { System.Windows.Forms.Clipboard.SetDataObject(previous, copy: true); } catch { /* ignore */ }
     }
 
     /// <summary>
