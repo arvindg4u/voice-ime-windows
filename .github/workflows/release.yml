@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -20,7 +22,8 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Run unit tests
-        run: dotnet test VoiceIme.Windows.sln -c Release
+        timeout-minutes: 10
+        run: dotnet test VoiceIme.Windows.sln -c Release --blame-hang --blame-hang-timeout 5m
 
       - name: Publish single-file EXE
         run: >
@@ -30,8 +33,56 @@ jobs:
           /p:IncludeNativeLibrariesForSelfExtract=true
           -o publish
 
-      - name: Attach EXE to GitHub Release
+      - name: Generate SHA-256 checksum
+        run: >
+          certutil -hashfile publish/VoiceIme.exe SHA256
+          | findstr /V "hash"
+          | findstr /V "^$"
+          > publish/VoiceIme.exe.sha256
+        shell: pwsh
+
+      - name: Read checksum for release notes
+        id: checksum
+        run: |
+          $hash = Get-FileHash -Path publish/VoiceIme.exe -Algorithm SHA256
+          echo "sha256=$($hash.Hash)" >> $env:GITHUB_OUTPUT
+          echo "size=$($hash.Length)" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: publish/VoiceIme.exe
-          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: Voice IME ${{ github.ref_name }}
+          body: |
+            ## Voice IME ${{ github.ref_name }}
+
+            Single-file, self-contained Windows EXE. No installer, no admin required.
+
+            ### What's new
+            - Modern Fluent-inspired settings shell with Dashboard home
+            - Light/dark themes that follow Windows (proper dark-mode palette)
+            - Recording overlay pill with live waveform and timer
+            - Clipboard retry on paste + re-paste from History
+            - Backend: Gemini transcription via global hotkey (Ctrl+Shift+Space)
+
+            ### How to install
+            1. Download `VoiceIme.exe` below.
+            2. Run it — it lives in the tray.
+            3. Tray → Settings → paste your Gemini API key → Save → Test.
+            4. Focus any text field, press `Ctrl+Shift+Space`, talk.
+
+            ### Verification
+            - SHA-256: `${{ steps.checksum.outputs.sha256 }}`
+            - File: `VoiceIme.exe` (single-file, self-contained, win-x64)
+
+            ### Requirements
+            - Windows 10+ (x64)
+            - A Gemini API key from https://aistudio.google.com/apikey
+          files: |
+            publish/VoiceIme.exe
+            publish/VoiceIme.exe.sha256
+          generate_release_notes: false
+          draft: false
+          prerelease: false
