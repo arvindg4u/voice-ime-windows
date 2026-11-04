@@ -27,6 +27,16 @@ namespace VoiceIme.Theme;
 /// - Contrast targets: primary text ≥ 7:1, secondary text ≥ 4.5:1,
 ///   disabled ≥ 3:1, UI components ≥ 3:1 against their background.
 /// </summary>
+/// <summary>
+/// Concrete theme values. Mirrors the HandyTheme.xaml resource dictionary
+/// so ThemeManager can reason about which palette to apply at runtime.
+/// </summary>
+public enum HandyTheme
+{
+    Light,
+    Dark
+}
+
 public static class ThemeManager
 {
     public const string SystemPreference = "system";
