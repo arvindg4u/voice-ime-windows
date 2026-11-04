@@ -29,7 +29,49 @@ Source of truth for the redesign decisions in `docs/DESIGN.md`.
 - Theme awareness: light/dark palettes swapped at runtime through `DynamicResource` brushes; follow the OS theme by default.
 - Accessibility: keyboard-navigable controls, visible focus indicators, `AutomationProperties.Name` on icon-only buttons, tooltips, scalable text (no hardcoded sizes where the system scales them).
 
-## 4. Constraints specific to this repo
+## 5. Dark mode best practices (web research)
+
+[Dark Mode Design Guide: Color, Type, A11y (2026)](https://mantlr.com/blog/dark-mode-design-guide-color-typography-accessibility),
+[Dark Mode Color Palettes: Complete Guide for 2025](https://mypalettetool.com/blog/dark-mode-color-palettes),
+[Dark Mode Color Schemes: Complete Design Guide 2026](https://colorpick.app/blog/dark-mode-color-schemes):
+
+- **Never pure black (`#000000`) as a dark surface.** Causes eye strain and
+  OLED "smearing" when scrolling. Use near-black dark gray (we use `#2C2B29`,
+  matching Windows 11 app-dark background). Both Material Design and Apple HIG
+  recommend this.
+- **Never pure white (`#FFFFFF`) as dark text.** Causes halation/glare against
+  dark backgrounds. Use off-white (we use `#E8E8E8`); retains high contrast
+  (~14:1 on our base) while reducing strain.
+- **Desaturate and lighten accent colors for dark mode.** Fully saturated
+  brand colors that work on white "glow" or vibrate against dark surfaces.
+  Reduce saturation 10–20%, increase lightness 5–10% (we shift brand pink
+  `#DA5893` → `#E08FB8` on dark).
+- **Surface elevation via value gaps, not shadows.** In light mode shadows
+  create depth; on dark backgrounds shadows are ineffective. Surfaces layer
+  with progressively lighter steps (Background → Surface → SurfaceElevated).
+- **Text hierarchy:** primary ~87% white opacity, secondary ~60%, disabled
+  ~38% on dark surfaces.
+- **Contrast targets:** primary text ≥ 7:1 (ours ~14:1), secondary ≥ 4.5:1
+  (ours ~7.6:1), disabled ≥ 3:1 (ours ~3.5:1), UI components ≥ 3:1.
+- **Respect the OS theme first.** Read `AppsUseLightTheme` from the Windows
+  registry at startup, follow it by default, and offer a manual light/dark/
+  system override persisted in settings (`ThemeManager.ResolveTheme`).
+- **Use `DynamicResource` (not `StaticResource`)** for all theme brushes so
+  live theme switching updates the UI without restart. WPF reads the registry
+  value once at read time; `DynamicResource` is what keeps the app reactive.
+
+## 6. WPF-specific theming notes
+
+[What's new in WPF for .NET 9 — Fluent theme](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/whats-new/net90):
+- WPF .NET 9 includes a Fluent theme with integrated light/dark modes and
+  system accent color support (`SystemColors.AccentColorBrushKey`).
+- We target .NET 8 without the Fluent package, so we hand-author the token
+  system. `SystemColors` via `DynamicResource` could be added later to track
+  the user's Windows accent color at runtime.
+- `DynamicResource` (not direct `SystemColors.XColor` reads) is required for
+  runtime color tracking — direct reads bake in the value at read time.
+
+## 7. Constraints specific to this repo
 
 - Stack is locked: C# 12, .NET 8, WPF + WinForms `NotifyIcon`, NAudio, xUnit.
 - **No new NuGet packages:** `nuget.org` is not reachable from this environment, so all UI is hand-authored WPF with the existing `HandyTheme.xaml` design tokens.

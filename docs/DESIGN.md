@@ -19,23 +19,46 @@ Backend (dictation pipeline, coordinator, tray lifecycle) is intentionally untou
 ## 2. Visual language (design tokens)
 
 All colors are `DynamicResource` keys in `Theme/HandyTheme.xaml`, swapped live by
-`ThemeManager.ApplyTheme`.
+`ThemeManager.ApplyTheme`. The system is a **single semantic token map** applied
+to two palettes (light / dark) — not two independent stylesheets.
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `HandyText` | #0F0F0F | #FBFBFB | Body text |
-| `HandyTextSecondary` | #5F5F5F | #A8A7A4 | Helper / secondary text |
-| `HandyBackground` | #FBFBFB | #2C2B29 | Window base |
-| `HandyCardBackground` | #FFFFFF | #373634 | Cards / surfaces |
-| `HandyCardBorder` | #808080 @20% | #808080 @20% | Card hairlines |
-| `HandyAccent` | #DA5893 | #DA5893 | Brand accent, primary actions |
-| `HandyLogoPrimary` | #FAA2CA | #F28CBB | Active nav fill |
-| `HandyHoverBackground` | #EFEFEF | #383735 | Hover states |
-| `HandyActiveBackground` | #FDE9F0 | #3B2D32 | Active nav fill (tint) |
-| `HandyDivider` | #E5E5E5 | #3A3937 | Hairline dividers |
-| `HandyError` | #DC2626 | #F87171 | Error text / borders |
-| `HandyWarning` | #D97706 | #FBBF24 | Warning text |
-| `HandyFontFamily` | \multicolumn{3}{c}{Segoe UI, system fallback} |
+### Color palette
+
+| Token | Light | Dark | Contrast (dark) | Use |
+| --- | --- | --- | --- | --- |
+| `HandyBackground` | #FBFBFB | #2C2B29 | — | Window/page base canvas |
+| `HandySurface` | #FFFFFF | #3A3937 | — | Cards, elevated containers |
+| `HandySurfaceElevated` | #F8F8F8 | #454442 | — | Modals, dropdowns, flyouts |
+| `HandyText` | #0F0F0F | #E8E8E8 | ~14:1 | Primary body text |
+| `HandyTextSecondary` | #5F5F5F | #A8A7A4 | ~7.6:1 | Helper / caption text |
+| `HandyTextDisabled` | #C7C7C7 | #6E6D6B | ~3.5:1 | Disabled text |
+| `HandyAccent` | #DA5893 | #E08FB8 | — | Brand accent, primary actions |
+| `HandyAccentHover` | #C44E7F | #D67AA8 | — | Accent under pointer |
+| `HandyAccentActive` | #AE4372 | #C86A94 | — | Accent when pressed |
+| `HandyAccentContainer` | #FDE9F0 | #3B2D32 | — | Tinted fill behind accent |
+| `HandyBorder` | #E5E5E5 | #3A3937 | — | Input borders, card borders |
+| `HandyDivider` | #E5E5E5 | #3A3937 | — | Hairline section dividers |
+| `HandyError` | #DC2626 | #F87171 | — | Error text / borders |
+| `HandyWarning` | #D97706 | #FBBF24 | — | Warning text / borders |
+| `HandyFocusBorder` | #DA5893 | #E08FB8 | — | Keyboard focus ring |
+| `HandyInkDisabled` | #C7C7C7 | #6E6D6B | — | Disabled icons / button glyphs |
+| `HandyHoverBackground` | #EFEFEF | #383735 | — | Subtle hover fill |
+| `HandyActiveBackground` | #FDE9F0 | #3B2D32 | — | Active / selected fill |
+| `HandyLogoPrimary` | #FAA2CA | #F28CBB | — | Active nav rail fill |
+| `HandyFontFamily` | \multicolumn{4}{c}{Segoe UI, system fallback} |
+
+### Dark-mode design rules (applied)
+
+- **No pure black surfaces:** dark base is `#2C2B29` (dark gray, not `#000000`)
+  — avoids eye strain and OLED smearing.
+- **No pure white text:** dark text is `#E8E8E8` (off-white) — reduces glare
+  while retaining ~14:1 contrast on the dark base.
+- **Accent adjusted for dark:** brand pink `#DA5893` is desaturated and
+  lightened to `#E08FB8` on dark so it reads as a calm tint, not neon.
+- **Surface elevation via value gaps:** `Background → Surface → SurfaceElevated`
+  get progressively lighter on dark, so depth reads without shadows.
+- **Contrast targets:** primary text ≥ 7:1, secondary ≥ 4.5:1, disabled ≥ 3:1,
+  UI components ≥ 3:1 against their background. All dark pairings exceed these.
 
 ### Type scale
 
@@ -48,8 +71,9 @@ All colors are `DynamicResource` keys in `Theme/HandyTheme.xaml`, swapped live b
 
 ### Shapes & motion
 
-- Cards: 8 px corner radius, 1 px border, subtle drop-shadow on elevated surfaces.
-- Buttons: 8 px radius, min height 36 px, hover opacity/scale, pressed state.
+- Cards: 8 px corner radius, 1 px border, subtle elevation via surface layering.
+- Buttons: 8 px radius, min height 36 px, hover background + accent border,
+  pressed state (accent → accent-active).
 - Toggle: 40 × 22 px Windows-style toggle switch with knob translate animation.
 - Nav rail items: 44 px height, 10 px radius; active item = `HandyLogoPrimary` @80%,
   hover = `HandyHoverBackground`.
