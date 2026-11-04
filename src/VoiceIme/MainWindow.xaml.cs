@@ -304,7 +304,8 @@ public partial class MainWindow : Window
                 {
                     Height = 1,
                     BorderThickness = new Thickness(0, 1, 0, 0),
-                    BorderBrush = (System.Windows.Media.Brush)FindResource("HandyDivider"),
+                    BorderBrush = TryFindResource("HandyDivider") as System.Windows.Media.Brush
+                        ?? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE5, 0xE5, 0xE5)),
                     Margin = new Thickness(16, 8, 16, 4),
                 });
             }
@@ -312,7 +313,8 @@ public partial class MainWindow : Window
             var captured = section;
             var button = new System.Windows.Controls.Button
             {
-                Style = (Style)FindResource("HandyNavButton"),
+                Style = TryFindResource("HandyNavButton") as Style
+                    ?? new Style(typeof(System.Windows.Controls.Button)),
                 HorizontalContentAlignment = System.Windows.HorizontalAlignment.Stretch,
             };
             var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
