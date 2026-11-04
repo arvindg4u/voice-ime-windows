@@ -340,7 +340,7 @@ public sealed class GeminiSettingsViewTests
             var ok = view.SavePrompt();
 
             Assert.False(ok);
-            Assert.StartsWith("Save failed:", view.StatusMessage, StringComparison.Ordinal);
+            Assert.StartsWith("Couldn't save:", view.StatusMessage, StringComparison.Ordinal);
         }, saver: _ => throw new InvalidOperationException("disk gone"));
     }
 
@@ -454,7 +454,7 @@ public sealed class GeminiSettingsViewTests
             var ok = view.DeletePrompt();
 
             Assert.False(ok);
-            Assert.StartsWith("Save failed:", view.StatusMessage, StringComparison.Ordinal);
+            Assert.StartsWith("Couldn't save:", view.StatusMessage, StringComparison.Ordinal);
         }, saver: _ => throw new InvalidOperationException("disk gone"));
     }
 
