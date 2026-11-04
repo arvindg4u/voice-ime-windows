@@ -77,13 +77,5 @@ public sealed record TranscriptionError(string Message) : IDictationError
     }
 }
 
-/// <summary>
-/// Paste/clipboard delivery failed. The transcript is always in History
-/// (ClipboardStore.Add runs before the paste keystroke), so the message
-/// points there instead of asking for a re-dictation.
-/// </summary>
-public sealed record PasteError : IDictationError
-{
-    public string UserMessage =>
-        "Couldn't paste into the focused window — transcript kept in History";
-}
+// PasteError lives in PasteOutcome.cs — its message now depends on the
+// classified failure reason, so the type is defined beside the classifier.

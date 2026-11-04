@@ -42,6 +42,33 @@ public static class NativeInput
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+    // --- Target inspection (paste diagnosis) -----------------------------
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const uint TOKEN_QUERY = 0x0008;
+    private const int TokenElevation = 20;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(
+        IntPtr tokenHandle, int tokenInformationClass,
+        ref TOKEN_ELEVATION tokenInformation, uint tokenInformationLength,
+        out uint returnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    /// <summary>TOKEN_ELEVATION — a single DWORD, 1 when the token is elevated.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_ELEVATION
+    {
+        public int TokenIsElevated;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
     {
@@ -73,16 +100,22 @@ public static class NativeInput
     /// Copies text to the clipboard then pastes it into the focused window
     /// with the configured paste chord. Restores the previous clipboard
     /// afterwards. Must run on an STA thread.
+    ///
+    /// Returns a classified <see cref="PasteOutcome"/> instead of throwing, so
+    /// the caller can tell the user *why* it failed. A single generic message
+    /// cannot distinguish "that app is elevated and Windows forbids this" from
+    /// "the clipboard was momentarily locked", and the first can never be fixed
+    /// by trying again.
     /// </summary>
-    public static void PasteIntoFocusedWindow(string text) =>
+    public static PasteOutcome PasteIntoFocusedWindow(string text) =>
         PasteIntoFocusedWindow(text, PasteMethods.CtrlV);
 
     /// <summary>
     /// Chord-aware overload: the method is the persisted
     /// <see cref="PasteMethods"/> string (already coerced at the settings
-    /// boundary); unknown values fall back to Ctrl+V, never throw.
+    /// boundary); unknown values fall back to Ctrl+V.
     /// </summary>
-    public static void PasteIntoFocusedWindow(string text, string? method)
+    public static PasteOutcome PasteIntoFocusedWindow(string text, string? method)
     {
         // Snapshot the previous clipboard TEXT only (a plain string crosses
         // threads safely; an IDataObject COM proxy cannot leave this STA, so
@@ -95,13 +128,35 @@ public static class NativeInput
         }
         catch { /* clipboard busy */ }
 
-        SetClipboardTextWithRetry(text);
-        WarnIfForegroundIsSelf();
+        // Clipboard first: if we cannot even place the text, there is nothing
+        // to paste and the keystroke would only deliver stale content.
+        var clipboard = TrySetClipboard(text);
+        if (clipboard is not null)
+        {
+            return clipboard;
+        }
+
+        // Check the target BEFORE sending. Two of these are unrecoverable from
+        // this process, and sending anyway would paste into the wrong window
+        // (or nowhere) while reporting success.
+        var target = ClassifyTarget();
+        if (target is not null)
+        {
+            // The transcript is already on the clipboard, so the user can still
+            // recover it by hand — leave it there instead of restoring over it.
+            return target;
+        }
+
         NeutralizeHeldModifiers();
 
         // Give the clipboard a beat to settle before the keystroke lands.
         Thread.Sleep(50);
-        SendChord(PasteChords.ForMethod(method));
+
+        var sent = SendChord(PasteChords.ForMethod(method));
+        if (!sent.Delivered)
+        {
+            return sent;
+        }
 
         // Restore what the user had — best-effort AND DELAYED: the chord only
         // queues WM_KEYDOWNs, and slow targets (Electron, UWP, browsers, RDP)
@@ -110,6 +165,140 @@ public static class NativeInput
         // target has had time to consume the transcript.
         if (!string.IsNullOrEmpty(previousText))
             RestoreClipboardLater(previousText);
+
+        return PasteOutcome.Success;
+    }
+
+    /// <summary>
+    /// Places the transcript on the clipboard, returning null on success or a
+    /// classified failure. Distinguished from the input path because it is the
+    /// one failure the user can always work around (paste it themselves).
+    /// </summary>
+    private static PasteOutcome? TrySetClipboard(string text)
+    {
+        try
+        {
+            SetClipboardTextWithRetry(text);
+            return null;
+        }
+        catch (IOException ex)
+        {
+            Logger.Warning($"paste: clipboard unavailable — {ex.Message}");
+            return PasteOutcome.Failure(
+                PasteFailureReason.ClipboardBusy, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"paste: clipboard error ({ex.GetType().Name}) — {ex.Message}");
+            return PasteOutcome.Failure(
+                PasteFailureReason.ClipboardBusy, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Decides whether the chord can be delivered, before sending it.
+    /// Returns null when the target looks reachable.
+    ///
+    /// Deliberately conservative: an uncertain target is treated as reachable,
+    /// because refusing to paste is worse than pasting and being wrong.
+    /// </summary>
+    private static PasteOutcome? ClassifyTarget()
+    {
+        IntPtr hwnd;
+        try
+        {
+            hwnd = GetForegroundWindow();
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (hwnd == IntPtr.Zero)
+        {
+            Logger.Warning("paste: no foreground window to receive the chord");
+            return PasteOutcome.Failure(PasteFailureReason.NoForegroundWindow);
+        }
+
+        uint pid = 0;
+        try
+        {
+            GetWindowThreadProcessId(hwnd, out pid);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (pid == (uint)Environment.ProcessId)
+        {
+            // The overlay or settings window holds focus, so the chord lands on
+            // us. Sending it would be harmless but useless, and reporting
+            // success would be a lie.
+            Logger.Warning("paste: foreground window belongs to Voice IME — chord will not reach the target app");
+            return PasteOutcome.Failure(PasteFailureReason.FocusLost);
+        }
+
+        // UIPI: a lower-integrity process may not inject input into a
+        // higher-integrity one. Detect it up front so the message can say so
+        // rather than surfacing a generic failure the user will retry forever.
+        try
+        {
+            if (IsProcessElevated(pid))
+            {
+                Logger.Warning($"paste: target pid {pid} is elevated — UIPI blocks synthesized input");
+                return PasteOutcome.Failure(PasteFailureReason.TargetElevated);
+            }
+        }
+        catch
+        {
+            // Token probe unavailable — assume reachable and let SendInput decide.
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when the process is running with an elevated token. Uses
+    /// PROCESS_QUERY_LIMITED_INFORMATION, which is grantable for other users'
+    /// processes without needing full query rights.
+    /// </summary>
+    private static bool IsProcessElevated(uint pid)
+    {
+        var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (handle == IntPtr.Zero)
+        {
+            return false; // Cannot inspect — do not block the paste.
+        }
+
+        try
+        {
+            if (!OpenProcessToken(handle, TOKEN_QUERY, out var token))
+            {
+                return false;
+            }
+
+            try
+            {
+                var elevation = new TOKEN_ELEVATION();
+                var size = Marshal.SizeOf<TOKEN_ELEVATION>();
+                if (!GetTokenInformation(
+                        token, TokenElevation, ref elevation, (uint)size, out _))
+                {
+                    return false;
+                }
+
+                return elevation.TokenIsElevated != 0;
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
     }
 
     /// <summary>
@@ -191,31 +380,6 @@ public static class NativeInput
 
     private static bool IsKeyDown(ushort vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
-    /// <summary>
-    /// Key-free diagnosis: when the foreground window belongs to this process
-    /// (overlay stole focus), the chord cannot reach the user's target app —
-    /// log it so "pasted nothing, no error" reports become actionable.
-    /// </summary>
-    private static void WarnIfForegroundIsSelf()
-    {
-        try
-        {
-            var hwnd = GetForegroundWindow();
-            if (hwnd == IntPtr.Zero)
-            {
-                Logger.Warning("paste: no foreground window to receive the chord");
-                return;
-            }
-            GetWindowThreadProcessId(hwnd, out var pid);
-            if (pid == (uint)Environment.ProcessId)
-                Logger.Warning("paste: foreground window belongs to Voice IME — chord will not reach the target app");
-        }
-        catch
-        {
-            // Diagnosis only; never block the paste.
-        }
-    }
-
     private static void RestoreClipboardLater(string previousText)
     {
         var thread = new Thread(() =>
@@ -230,18 +394,17 @@ public static class NativeInput
     }
 
     /// <summary>
-    /// AutoSubmit (Task 8): synthesize Enter into the focused window right
-    /// after a paste, for single-line targets (search boxes, chat inputs).
-    /// Throws only when SendInput itself reports short — same contract as
-    /// the paste chord above.
+    /// AutoSubmit: synthesize Enter into the focused window right after a
+    /// paste, for single-line targets (search boxes, chat inputs). Returns the
+    /// classified outcome rather than throwing, matching the paste chord.
     /// </summary>
-    public static void PressEnter()
+    public static PasteOutcome PressEnter()
     {
         var inputs = new INPUT[] { KeyDown(PasteChords.VkReturn), KeyUp(PasteChords.VkReturn) };
-        SendOrThrow(inputs);
+        return SendOrClassify(inputs);
     }
 
-    private static void SendChord(PasteChord chord)
+    private static PasteOutcome SendChord(PasteChord chord)
     {
         var inputs = new List<INPUT>(chord.Modifiers.Length * 2 + 2);
         foreach (var modifier in chord.Modifiers)
@@ -256,21 +419,26 @@ public static class NativeInput
             inputs.Add(KeyUp(chord.Modifiers[i]));
         }
 
-        SendOrThrow(inputs.ToArray());
+        return SendOrClassify(inputs.ToArray());
     }
 
-    private static void SendOrThrow(INPUT[] inputs)
+    /// <summary>
+    /// Sends the chord and classifies a failure from the Win32 error rather
+    /// than throwing a message that discards the cause.
+    /// </summary>
+    private static PasteOutcome SendOrClassify(INPUT[] inputs)
     {
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
-        if (sent != inputs.Length)
+        if (sent == inputs.Length)
         {
-            var error = Marshal.GetLastWin32Error();
-            // win32=5 (access denied) is UIPI: the focused window is elevated
-            // and a non-elevated process may not inject input into it.
-            Logger.Warning($"paste: SendInput delivered {sent}/{inputs.Length} (win32={error})"
-                + (error == 5 ? " — focused window appears elevated (UIPI)" : ""));
-            throw new IOException("Couldn't send keystrokes to the focused window");
+            return PasteOutcome.Success;
         }
+
+        var error = Marshal.GetLastWin32Error();
+        var reason = PasteDiagnosis.FromSendInputError(error);
+        Logger.Warning($"paste: SendInput delivered {sent}/{inputs.Length} (win32={error})"
+            + (reason == PasteFailureReason.TargetElevated ? " — UIPI (target elevated)" : string.Empty));
+        return PasteOutcome.Failure(reason, $"SendInput win32={error}");
     }
 
     private static INPUT KeyDown(ushort vk) => Key(vk, 0);

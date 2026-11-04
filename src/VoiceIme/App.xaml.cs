@@ -680,21 +680,33 @@ public partial class App : System.Windows.Application
         _clips.Add(transcript);
         RefreshMenu();
         var pasteAt = DateTimeOffset.UtcNow;
-        try
+        var outcome = NativeInput.PasteIntoFocusedWindow(transcript, _settings.PasteMethod);
+        if (!outcome.Delivered)
         {
-            NativeInput.PasteIntoFocusedWindow(transcript, _settings.PasteMethod);
-            // AutoSubmit: Enter right after the chord lands, for single-line
-            // targets. Inside the same try — an Enter failure is a paste
-            // failure, not a silent half-delivery.
-            if (_settings.AutoSubmit)
-            {
-                NativeInput.PressEnter();
-            }
-        }
-        catch (Exception pasteEx)
-        {
-            _coordinator.ReportUploadFailed(generation, new PasteError(), pasteEx);
+            // Report the classified cause instead of one generic sentence, so
+            // the message can say what actually went wrong (elevated target,
+            // clipboard locked, focus lost) and what the user can do about it.
+            _coordinator.ReportUploadFailed(
+                generation,
+                new PasteError(outcome.Reason),
+                new InvalidOperationException(outcome.Diagnostic));
             return;
+        }
+
+        // AutoSubmit: Enter right after the chord lands, for single-line
+        // targets. A rejected Enter is a paste failure too — a half-delivery
+        // reported as success is worse than an honest error.
+        if (_settings.AutoSubmit)
+        {
+            var enter = NativeInput.PressEnter();
+            if (!enter.Delivered)
+            {
+                _coordinator.ReportUploadFailed(
+                    generation,
+                    new PasteError(enter.Reason),
+                    new InvalidOperationException(enter.Diagnostic));
+                return;
+            }
         }
 
         Logger.LogLatency("response_to_paste", DateTimeOffset.UtcNow - pasteAt);
@@ -1262,16 +1274,24 @@ public partial class App : System.Windows.Application
             EnsureOverlay();
             _overlay?.ShowError(error.UserMessage);
         }
+        // A failure the user cannot act on is only half a message. Paste
+        // errors know their own next step (elevated target, clipboard busy…),
+        // so include it — the overlay pill stays terse, the toast explains.
+        var body = error is PasteError { Recovery: { } recovery }
+            ? $"{error.UserMessage}. {recovery}"
+            : error.UserMessage;
+
         _notifier.Notify(
             "Voice IME",
-            error.UserMessage,
+            body,
             NotificationSeverity.Error,
             secrets: _settings.ApiKeys);
         SetTray(TrayStateText.TooltipFor(DictationState.Error, _settings.Hotkey, error.UserMessage));
         if (cause is not null)
         {
             // Type names only — raw exception text may embed key material.
-            Logger.Error($"dictation failed error={error.GetType().Name} cause={cause.GetType().Name}");
+            var reason = error is PasteError paste ? $" reason={paste.Reason}" : string.Empty;
+            Logger.Error($"dictation failed error={error.GetType().Name}{reason} cause={cause.GetType().Name}");
         }
 
         _coordinator.AcknowledgeError();

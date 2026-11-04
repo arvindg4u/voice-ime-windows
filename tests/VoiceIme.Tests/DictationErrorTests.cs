@@ -74,8 +74,10 @@ public sealed class DictationErrorTests
     [Fact]
     public void PasteError_PointsAtHistory()
     {
-        IDictationError error = new PasteError();
+        // The transcript is stored before the paste is attempted, so the
+        // recovery guidance can always name History as the safe fallback.
+        var error = new PasteError();
 
-        Assert.Contains("History", error.UserMessage, StringComparison.Ordinal);
+        Assert.Contains("History", error.Recovery, StringComparison.Ordinal);
     }
 }
