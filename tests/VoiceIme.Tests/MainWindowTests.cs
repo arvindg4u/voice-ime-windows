@@ -146,11 +146,32 @@ public sealed class MainWindowTests
     }
 
     [Fact]
-    public void FirstRunHint_UnseenStore_ShowsWithHotkeyReminder()
+    public void FirstRunHint_UnseenStoreWithoutKey_AsksForApiKey()
+    {
+        if (!TryRunOnSta(window =>
+        {
+            // No API keys configured, so the banner must prompt for setup —
+            // telling the user to press the hotkey would be a dead end.
+            var settings = new SettingsStore { Hotkey = "Alt+F4" };
+            window.BindFirstRunHint(settings, _ => { });
+
+            Assert.True(window.IsFirstRunHintVisible);
+            var text = Assert.IsType<TextBlock>(window.FindName("FirstRunHintText"));
+            Assert.Contains("API key", text.Text);
+            Assert.DoesNotContain("Alt+F4", text.Text);
+        }))
+        {
+            return;
+        }
+    }
+
+    [Fact]
+    public void FirstRunHint_UnseenStoreWithKey_ShowsHotkeyReminder()
     {
         if (!TryRunOnSta(window =>
         {
             var settings = new SettingsStore { Hotkey = "Alt+F4" };
+            settings.ApiKeys.Add("test-key");
             window.BindFirstRunHint(settings, _ => { });
 
             Assert.True(window.IsFirstRunHintVisible);
@@ -200,7 +221,7 @@ public sealed class MainWindowTests
     }
 
     [Fact]
-    public void FirstRunHint_OpenSettings_NavigatesWithoutDismissing()
+    public void FirstRunHint_OpenSettings_NavigatesToSpeechWithoutDismissing()
     {
         if (!TryRunOnSta(window =>
         {
@@ -213,7 +234,8 @@ public sealed class MainWindowTests
                 window.FindName("FirstRunHintSettingsButton"));
             open.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
-            Assert.Equal(MainSection.General, window.CurrentSection);
+            // The API key lives in the Speech section, so setup must land there.
+            Assert.Equal(MainSection.Gemini, window.CurrentSection);
             Assert.False(settings.SeenHint);
             Assert.Equal(0, saverCalls);
             Assert.True(window.IsFirstRunHintVisible);

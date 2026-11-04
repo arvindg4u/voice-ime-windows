@@ -3,10 +3,27 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using VoiceIme.Theme;
 
 namespace VoiceIme;
+
+/// <summary>
+/// Severity of a footer/statu message. Drives colour plus an accompanying
+/// glyph so state is never conveyed by colour alone.
+/// </summary>
+public enum StatusSeverity
+{
+    /// <summary>Nothing to report — neutral muted text, no icon.</summary>
+    Neutral,
+    /// <summary>Something worked (saved, copied, connected).</summary>
+    Success,
+    /// <summary>Worked with a caveat, or a setting that is stored but inert.</summary>
+    Warning,
+    /// <summary>The operation failed and the user may need to act.</summary>
+    Error,
+}
 
 /// <summary>
 /// Handy shell: 160px sidebar + scrollable section host + status footer.
@@ -155,18 +172,50 @@ public partial class MainWindow : Window
     internal object? SectionView(MainSection section) =>
         _sectionViews.TryGetValue(section, out var view) ? view : null;
 
-    /// <summary>Mirrors the tray state into the footer. Thread-safe.</summary>
-    public void SetStatus(string text)
+    /// <summary>
+    /// Mirrors the tray state into the footer. Thread-safe.
+    ///
+    /// Resets to <see cref="StatusSeverity.Neutral"/> — otherwise a stale error
+    /// glyph and colour would survive into the next "ready" message, which is
+    /// exactly the kind of quiet lie this footer exists to avoid.
+    /// </summary>
+    public void SetStatus(string text) => SetStatus(text, StatusSeverity.Neutral);
+
+    /// <summary>
+    /// Sets the footer message together with its severity.
+    ///
+    /// The footer previously rendered every message — "ready", "saved", and
+    /// "couldn't save your settings" — in the same muted grey, so a failure was
+    /// indistinguishable from a heartbeat. Severity now drives both the colour
+    /// and an accompanying glyph, because colour alone must never be the only
+    /// cue (WCAG 1.4.1). Thread-safe.
+    /// </summary>
+    public void SetStatus(string text, StatusSeverity severity)
     {
         ArgumentNullException.ThrowIfNull(text);
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(() => SetStatus(text));
+            Dispatcher.BeginInvoke(() => SetStatus(text, severity));
             return;
         }
 
         StatusText.Text = text;
+
+        var (glyph, iconBrush, textBrush) = severity switch
+        {
+            StatusSeverity.Success => (MainNav.Glyphs.Success, "SuccessText", "SuccessText"),
+            StatusSeverity.Warning => (MainNav.Glyphs.Warning, "WarningText", "WarningText"),
+            StatusSeverity.Error => (MainNav.Glyphs.Error, "ErrorText", "ErrorText"),
+            _ => (string.Empty, "TextMuted", "TextMuted"),
+        };
+
+        StatusIcon.Text = glyph;
+        StatusIcon.SetResourceReference(TextBlock.ForegroundProperty, iconBrush);
+        StatusText.SetResourceReference(TextBlock.ForegroundProperty, textBrush);
     }
+
+    /// <summary>Convenience: report a failure through the footer.</summary>
+    public void SetStatusError(string text) => SetStatus(text, StatusSeverity.Error);
 
     /// <summary>
     /// Permits the next close to proceed. Called only by the tray Quit path;
@@ -218,8 +267,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            FirstRunHintText.Text =
-                $"Press {_firstRunHintSettings.Hotkey} to dictate.";
+            // The banner is a setup prompt: its message depends on whether the
+            // app is actually usable yet. With no API key the hotkey is dead,
+            // so telling the user to "press it" would be a lie.
+            FirstRunHintText.Text = string.IsNullOrWhiteSpace(_firstRunHintSettings.BaseUrl) ||
+                                    _firstRunHintSettings.ApiKeys.Count == 0
+                ? "Add your Gemini API key to start dictating. It stays on this PC, encrypted."
+                : $"You're all set. Press {_firstRunHintSettings.Hotkey} to dictate from any app.";
             FirstRunHintCard.Visibility = _firstRunHintSettings.SeenHint
                 ? Visibility.Collapsed
                 : Visibility.Visible;
@@ -235,8 +289,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Navigate without dismissing — dismiss is explicit only.
-            NavigateTo(MainSection.General);
+            // Send the user where the blocking task actually lives — the API
+            // key is in Speech, not General. The old handler navigated to
+            // General, so "Open Settings" landed them on a screen with nothing
+            // to fill in. Dismissal stays explicit.
+            NavigateTo(MainSection.Gemini);
         }
         catch
         {
@@ -298,24 +355,34 @@ public partial class MainWindow : Window
             var captured = section;
             var button = new System.Windows.Controls.Button
             {
-                Style = (Style)FindResource("HandyNavButton"),
+                Style = (Style)FindResource("NavButton"),
                 HorizontalContentAlignment = System.Windows.HorizontalAlignment.Stretch,
             };
+
+            // Nav rows previously had no accessible name, so a screen reader
+            // announced an unnamed button containing a private-use glyph. Name
+            // it, and expose the label as help text for good measure.
+            AutomationProperties.SetName(button, MainNav.AutomationNameFor(captured));
+            AutomationProperties.SetAutomationId(button, "Nav" + captured);
+
             var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
-            row.Children.Add(new TextBlock
+
+            // Decorative glyph: a plain TextBlock exposes no automation peer,
+            // so it is invisible to a screen reader while the button's own
+            // accessible name carries the meaning. No extra plumbing needed.
+            var glyph = new TextBlock
             {
                 Text = MainNav.IconFor(captured),
-                FontSize = 14,
-                Width = 24,
-                VerticalAlignment = VerticalAlignment.Center,
-            });
+                Style = (Style)FindResource("NavGlyph"),
+            };
+            row.Children.Add(glyph);
+
             row.Children.Add(new TextBlock
             {
                 Text = MainNav.LabelFor(captured),
-                FontSize = 13,
-                FontWeight = FontWeights.Medium,
-                VerticalAlignment = VerticalAlignment.Center,
+                Style = (Style)FindResource("NavLabel"),
             });
+
             button.Content = row;
             button.Click += (_, _) => NavigateTo(captured);
             NavPanel.Children.Add(button);
@@ -339,7 +406,7 @@ public partial class MainWindow : Window
             FontSize = 13,
             Margin = new Thickness(4),
         };
-        placeholder.SetResourceReference(TextBlock.ForegroundProperty, "HandyMidGray");
+        placeholder.SetResourceReference(TextBlock.ForegroundProperty, "TextMuted");
         return placeholder;
     }
 }

@@ -33,10 +33,10 @@ public sealed class MainNavTests
     [Theory]
     [InlineData(MainSection.General, "General")]
     [InlineData(MainSection.History, "History")]
-    [InlineData(MainSection.Gemini, "Gemini")]
+    [InlineData(MainSection.Gemini, "Speech")]
     [InlineData(MainSection.Advanced, "Advanced")]
     [InlineData(MainSection.About, "About")]
-    public void LabelFor_ReturnsPlanName(MainSection section, string expected)
+    public void LabelFor_ReturnsDisplayName(MainSection section, string expected)
     {
         Assert.Equal(expected, MainNav.LabelFor(section));
     }
@@ -56,6 +56,6 @@ public sealed class MainNavTests
         var unknown = (MainSection)99;
 
         Assert.Equal("99", MainNav.LabelFor(unknown));
-        Assert.Equal("❓", MainNav.IconFor(unknown));
+        Assert.Equal(MainNav.Glyphs.Question, MainNav.IconFor(unknown));
     }
 }

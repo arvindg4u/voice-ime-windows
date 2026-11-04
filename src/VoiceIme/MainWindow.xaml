@@ -2,116 +2,213 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:VoiceIme"
-        Title="Voice IME — Settings" Width="680" Height="570"
-        MinWidth="680" MinHeight="570"
+        Title="Voice IME — Settings"
+        Width="900" Height="680"
+        MinWidth="760" MinHeight="520"
         Icon="pack://application:,,,/VoiceIme;component/Assets/voiceime.ico"
         WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource HandyBackground}">
-    <!-- Handy shell (Task 2): fixed 160px sidebar + scrollable content + footer.
-         Per-section Views/* UserControls plug into SectionHost via NavigateTo
-         (Tasks 3-5). Until then each section shows a placeholder. -->
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        Background="{DynamicResource SurfaceCanvas}">
+
+    <!--
+      Shell layout.
+
+      Sidebar (208px) | content
+
+      The window used to be a fixed 680x570 with MinWidth == Width, so it could
+      not be made smaller and the ~9-row General section always scrolled inside
+      a 390px viewport. It now opens at 900x680, which fits the densest screen
+      (General) without scrolling, and can be resized down to 760x520.
+
+      Content lives in a ScrollViewer with a constrained column (max 720) so
+      helper text keeps a readable measure instead of stretching across a wide
+      monitor and wrapping into unreadable single lines.
+    -->
+
     <Window.Resources>
-        <!-- Sidebar nav item: transparent, 8px radius. Active = pink overlay
-             @80% (reference bg-logo-primary/80); inactive hover = gray @20%
-             (HandySecondaryBackground is #808080 @20%). All DynamicResource
-             so ThemeManager.ApplyTheme updates live. -->
-        <Style x:Key="HandyNavButton" TargetType="Button">
+
+        <!-- Sidebar navigation item. 40px tall to satisfy WCAG 2.5.8 (24x24
+             minimum) with room for a 20px glyph, 8px gutter, 13px label.
+             Active state is an attached property from code-behind so the
+             trigger stays in XAML and survives theme swaps. -->
+        <Style x:Key="NavButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Margin" Value="0,0,0,4" />
-            <Setter Property="FontFamily" Value="{DynamicResource HandyFontFamily}" />
-            <Setter Property="Foreground" Value="{DynamicResource HandyText}" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFontFamily}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusVisualRing}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                CornerRadius="8">
-                            <Grid>
-                                <Border x:Name="HoverFill" CornerRadius="8"
-                                        Background="{DynamicResource HandySecondaryBackground}"
-                                        Visibility="Collapsed" />
-                                <Border x:Name="ActiveFill" CornerRadius="8"
-                                        Background="{DynamicResource HandyLogoPrimary}"
-                                        Opacity="0.8"
-                                        Visibility="Collapsed" />
-                                <ContentPresenter Margin="8,6" />
-                            </Grid>
+                        <Border x:Name="Root" Background="{TemplateBinding Background}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="HoverFill" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="Root" Property="Background"
+                                        Value="{DynamicResource SurfaceHover}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource TextPrimary}" />
                             </Trigger>
                             <Trigger Property="local:MainWindow.IsNavActive" Value="True">
-                                <Setter TargetName="ActiveFill" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="Root" Property="Background"
+                                        Value="{DynamicResource SurfaceSelected}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource AccentInk}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Icon tile in front of a nav label. -->
+        <Style x:Key="NavGlyph" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Left" />
+        </Style>
+
+        <Style x:Key="NavLabel" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{DynamicResource UiFontFamily}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
     </Window.Resources>
+
     <DockPanel>
-        <!-- Footer: left = tray status, right = updates note + version. -->
+
+        <!-- ============================ FOOTER ============================ -->
         <Border DockPanel.Dock="Bottom"
-                BorderBrush="{DynamicResource HandyCardBorder}" BorderThickness="0,1,0,0"
-                Background="{DynamicResource HandyBackground}">
-            <DockPanel Margin="16,8">
-                <TextBlock x:Name="StatusText" DockPanel.Dock="Left" VerticalAlignment="Center"
-                           FontSize="12" Foreground="{DynamicResource HandyMidGray}"
-                           Text="Voice IME — ready" />
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock FontSize="12" Foreground="{DynamicResource HandyMidGray}"
-                               Text="Updates via Releases" />
-                    <TextBlock FontSize="12" Foreground="{DynamicResource HandyMidGray}"
-                               Margin="4,0" Text="•" />
-                    <TextBlock x:Name="VersionText" FontSize="12"
-                               Foreground="{DynamicResource HandyMidGray}" Text="v1.0.0" />
+                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1,0,0"
+                Background="{DynamicResource SurfaceCanvas}">
+            <Grid Margin="20,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Live status: tray state, save confirmations, errors.
+                     Severity is set from code-behind via StatusSeverity so a
+                     failure is not just a grey string (WCAG 1.4.1: never convey
+                     state by colour alone — an icon accompanies it). -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="StatusIcon" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Foreground="{DynamicResource TextMuted}" Text="" />
+                    <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+                               FontFamily="{DynamicResource UiFontFamily}" FontSize="12"
+                               Foreground="{DynamicResource TextMuted}"
+                               TextTrimming="CharacterEllipsis"
+                               AutomationProperties.LiveSetting="Polite"
+                               Text="Ready" />
                 </StackPanel>
+
+                <TextBlock x:Name="VersionText" Grid.Column="1" VerticalAlignment="Center"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                           Foreground="{DynamicResource TextMuted}" Text="v1.0.1" />
+            </Grid>
+        </Border>
+
+        <!-- =========================== SIDEBAR =========================== -->
+        <Border DockPanel.Dock="Left" Width="208"
+                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,1,0"
+                Background="{DynamicResource SurfaceCanvas}">
+            <DockPanel Margin="12,0">
+
+                <!-- Brand row -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,20,8,16">
+                    <Border Width="28" Height="28" CornerRadius="8"
+                            Background="{DynamicResource AccentFill}" VerticalAlignment="Center">
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="14" Text="&#xE720;"
+                                   Foreground="{DynamicResource OnAccent}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="Voice IME" Margin="10,0,0,0" VerticalAlignment="Center"
+                               FontFamily="{DynamicResource UiFontFamily}" FontSize="14"
+                               FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                </StackPanel>
+
+                <Border DockPanel.Dock="Top" Height="1" Margin="8,0,8,12"
+                        Background="{DynamicResource BorderSubtle}" />
+
+                <!-- Nav items (built in code-behind from MainNav) -->
+                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="NavPanel" />
+                </ScrollViewer>
             </DockPanel>
         </Border>
 
-        <!-- Sidebar: 160px logo + nav. -->
-        <Border DockPanel.Dock="Left" Width="160"
-                BorderBrush="{DynamicResource HandyCardBorder}" BorderThickness="0,0,1,0"
-                Background="{DynamicResource HandyBackground}">
-            <StackPanel Margin="8,0">
-                <TextBlock Margin="8,16,8,8" FontSize="16" FontWeight="SemiBold"
-                           Foreground="{DynamicResource HandyText}" Text="🎙️ Voice IME" />
-                <Border BorderBrush="{DynamicResource HandyCardBorder}" BorderThickness="0,1,0,0"
-                        Margin="0,0,0,8" />
-                <StackPanel x:Name="NavPanel" />
-            </StackPanel>
-        </Border>
+        <!-- =========================== CONTENT =========================== -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-        <!-- First-run hint (Task 9): shown once until dismissed (SeenHint).
-             Fixed above the scrollable content; Handy card styling. -->
-        <Border x:Name="FirstRunHintCard" DockPanel.Dock="Top" Margin="16,12,16,0"
-                Style="{DynamicResource HandySettingCard}" Visibility="Collapsed">
-            <DockPanel>
-                <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,12,0">
-                    <TextBlock Text="FIRST RUN" Style="{DynamicResource HandyGroupHeader}"
-                               Margin="0,0,0,4" />
-                    <TextBlock x:Name="FirstRunHintText" FontSize="13"
-                               Foreground="{DynamicResource HandyText}" TextWrapping="Wrap"
-                               Text="Press Ctrl+Shift+Space to dictate." />
-                </StackPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
-                            VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <Button x:Name="FirstRunHintSettingsButton"
-                            Style="{DynamicResource HandySecondaryButton}"
-                            Content="Open Settings" Margin="0,0,8,0"
-                            Click="FirstRunHintSettingsButton_Click" />
-                    <Button x:Name="FirstRunHintDismissButton"
-                            Style="{DynamicResource HandySecondaryButton}"
-                            Content="Dismiss" Click="FirstRunHintDismissButton_Click" />
-                </StackPanel>
-            </DockPanel>
-        </Border>
+            <!-- First-run card. Shown until dismissed; pinned above the
+                 scroller so it cannot be scrolled away while setting up. -->
+            <Border x:Name="FirstRunHintCard" Grid.Row="0" Margin="28,24,28,0"
+                    Style="{DynamicResource Card}" Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-        <!-- Content: 16px padding, scrollable; section UserControls go here. -->
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16">
-            <ContentControl x:Name="SectionHost" />
-        </ScrollViewer>
+                    <Border Grid.Column="0" Width="36" Height="36" CornerRadius="18"
+                            Background="{DynamicResource AccentSubtle}" VerticalAlignment="Top">
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="16" Text="&#xE720;"
+                                   Foreground="{DynamicResource AccentInk}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Margin="14,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="Set up Voice IME" FontFamily="{DynamicResource UiFontFamily}"
+                                   FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimary}" />
+                        <TextBlock x:Name="FirstRunHintText" FontFamily="{DynamicResource UiFontFamily}"
+                                   FontSize="13" Foreground="{DynamicResource TextSecondary}"
+                                   TextWrapping="Wrap" Margin="0,3,0,0"
+                                   Text="Add your Gemini API key, then press Ctrl+Shift+Space to dictate." />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="FirstRunHintSettingsButton"
+                                Style="{DynamicResource PrimaryButton}"
+                                Content="Add API key" Margin="0,0,8,0"
+                                AutomationProperties.Name="Open speech settings to add your API key"
+                                Click="FirstRunHintSettingsButton_Click" />
+                        <Button x:Name="FirstRunHintDismissButton"
+                                Style="{DynamicResource SecondaryButton}"
+                                Content="Dismiss"
+                                AutomationProperties.Name="Dismiss setup message"
+                                Click="FirstRunHintDismissButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" Padding="28,20,28,28">
+                <ContentControl x:Name="SectionHost" MaxWidth="720"
+                                HorizontalAlignment="Left" />
+            </ScrollViewer>
+        </Grid>
     </DockPanel>
 </Window>

@@ -156,7 +156,17 @@ public partial class App : System.Windows.Application
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         _recorder.AutoStopped += HandleAutoStop;
         _recorder.LevelChanged += level =>
+        {
             _overlay?.SetLevel(SoundFeedback.ApplyDisplayGain(level, _settings.Volume));
+
+            // Mirror the same level into the General screen's mic test when it
+            // is visible and the test is running. Reuses the single capture
+            // stream — the settings view never opens its own.
+            if (_mainWindow?.SectionView(MainSection.General) is Views.GeneralSettingsView general)
+            {
+                general.OnInputLevel(level);
+            }
+        };
         _coordinator.ErrorRaised += HandleError;
         _coordinator.OperationCancelled += () =>
         {
@@ -252,6 +262,7 @@ public partial class App : System.Windows.Application
                 if (string.Equals(_settings.Theme, AppThemes.System, StringComparison.Ordinal))
                 {
                     ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(_settings.Theme));
+                    RefreshMenu();
                 }
             });
         }
@@ -307,6 +318,9 @@ public partial class App : System.Windows.Application
         {
             menu.Items.Add(TranslateMenuItem(item));
         }
+
+        // WinForms chrome doesn't follow the WPF theme swap on its own.
+        VoiceIme.Theme.TrayMenuTheme.Apply(menu);
 
         return menu;
     }

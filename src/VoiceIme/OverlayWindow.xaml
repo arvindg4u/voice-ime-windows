@@ -23,22 +23,29 @@
                              From="0" To="360" Duration="0:0:0.7"
                              RepeatBehavior="Forever" />
         </Storyboard>
+        <!-- Cancel: 28x28 satisfies the WCAG 2.5.8 24x24 minimum pointer
+             target (it was 22x22). Hover ink is OnAccent, not a hardcoded
+             White, so it stays legible against the accent in both themes. -->
         <Style x:Key="OverlayCancelButton" TargetType="Button">
-            <Setter Property="Width" Value="22" />
-            <Setter Property="Height" Value="22" />
-            <Setter Property="FontSize" Value="9" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{DynamicResource HandyMidGray}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="Focusable" Value="False" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root" CornerRadius="11" Background="Transparent">
+                        <Border x:Name="Root" CornerRadius="14"
+                                Background="{DynamicResource SurfaceHover}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource HandyAccent}" />
-                                <Setter Property="Foreground" Value="White" />
+                                <Setter TargetName="Root" Property="Background"
+                                        Value="{DynamicResource AccentFill}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource OnAccent}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -47,8 +54,8 @@
         </Style>
     </Window.Resources>
     <Border CornerRadius="25"
-            Background="{DynamicResource HandyCardBackground}"
-            BorderBrush="{DynamicResource HandyCardBorder}" BorderThickness="1"
+            Background="{DynamicResource SurfaceOverlay}"
+            BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
             Padding="12,0">
         <Grid>
             <Grid.ColumnDefinitions>
@@ -60,10 +67,10 @@
             <!-- Left: recording dot (pulsing) or uploading spinner. -->
             <Grid Grid.Column="0" Width="23" VerticalAlignment="Center">
                 <Ellipse x:Name="StatusDot" Width="7" Height="7"
-                         Fill="{DynamicResource HandyAccent}"
+                         Fill="{DynamicResource AccentFill}"
                          HorizontalAlignment="Center" VerticalAlignment="Center" />
                 <Ellipse x:Name="Spinner" Width="13" Height="13" Visibility="Collapsed"
-                         Fill="Transparent" Stroke="{DynamicResource HandyAccent}"
+                         Fill="Transparent" Stroke="{DynamicResource AccentFill}"
                          StrokeThickness="2" StrokeDashArray="2.5 1.8"
                          HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Ellipse.RenderTransform>
@@ -78,25 +85,25 @@
                             HorizontalAlignment="Center" VerticalAlignment="Center" />
                 <TextBlock x:Name="SendingLabel" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                           FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                           FontSize="12" Foreground="{DynamicResource TextMuted}"
                            Text="Sending…" />
                 <TextBlock x:Name="PreviewText" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                           FontSize="12" Foreground="{DynamicResource HandyMidGray}"
+                           FontSize="12" Foreground="{DynamicResource TextMuted}"
                            MaxWidth="130" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="ErrorText" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                           FontSize="12" Foreground="{DynamicResource HandyError}"
+                           FontSize="12" Foreground="{DynamicResource ErrorText}"
                            MaxWidth="130" TextTrimming="CharacterEllipsis" />
             </Grid>
 
             <!-- Right: elapsed timer + cancel. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="TimerText" VerticalAlignment="Center" Margin="0,0,8,0"
-                           FontFamily="Consolas" FontSize="12"
-                           Foreground="{DynamicResource HandyMidGray}"
+                           FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
+                           Foreground="{DynamicResource TextMuted}"
                            Text="0:00" />
-                <Button x:Name="CancelButton" Style="{StaticResource OverlayCancelButton}"
+                <Button x:Name="CancelButton" Style="{DynamicResource OverlayCancelButton}"
                         Content="✕" Click="OnCancelClick" />
             </StackPanel>
         </Grid>

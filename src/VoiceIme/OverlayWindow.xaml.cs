@@ -63,7 +63,7 @@ public partial class OverlayWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(i == 0 ? 0 : WaveBarGap, 0, 0, 0),
             };
-            bar.SetResourceReference(Shape.FillProperty, "HandyAccent");
+            bar.SetResourceReference(Shape.FillProperty, "AccentFill");
             WavePanel.Children.Add(bar);
             _bars[i] = bar;
         }
@@ -237,7 +237,7 @@ public partial class OverlayWindow : Window
         if (recording || error)
         {
             StatusDot.SetResourceReference(
-                Shape.FillProperty, recording ? "HandyAccent" : "HandyError");
+                Shape.FillProperty, recording ? "AccentFill" : "ErrorText");
             StatusDot.BeginStoryboard(
                 (System.Windows.Media.Animation.Storyboard)FindResource("DotPulse"));
         }
