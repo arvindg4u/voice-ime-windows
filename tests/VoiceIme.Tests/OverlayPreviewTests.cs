@@ -54,6 +54,21 @@ public sealed class OverlayPreviewTests
         Assert.Equal("hello", interimRun);
     }
 
+    [Theory]
+    [InlineData("short", 10, "short")]
+    [InlineData("exactly10!", 10, "exactly10!")]
+    [InlineData("0123456789abc", 10, "3456789abc")]
+    [InlineData("abc", 0, "")]
+    public void TailWindow_KeepsTheLastCharacters(string input, int max, string expected) =>
+        Assert.Equal(expected, OverlayState.TailWindow(input, max));
+
+    [Fact]
+    public void TailWindow_NegativeMax_YieldsEmptyNotAThrow()
+    {
+        // Slicing with a negative index would throw; the guard must catch it.
+        Assert.Equal(string.Empty, OverlayState.TailWindow("something", -5));
+    }
+
     [Fact]
     public void PreviewRuns_FinalsOnly_HasNoTrailingSpace()
     {

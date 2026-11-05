@@ -73,6 +73,30 @@ public sealed record OverlayState(OverlayPhase Phase, float Level, string? Messa
     }
 
     /// <summary>
+    /// Keeps only the last <paramref name="maxChars"/> characters of a string.
+    ///
+    /// <para>Measured cost of a single-line TextBlock grows with its character
+    /// count, and the preview is re-measured on every interim revision. The
+    /// window is deliberately far wider than the visible pill, so the cut is
+    /// always off-screen — this bounds the layout work without changing what
+    /// the user sees.</para>
+    ///
+    /// <para>Returns the input unchanged when it already fits, and never throws
+    /// on a non-positive window (it degrades to empty rather than slicing with
+    /// a negative index).</para>
+    /// </summary>
+    internal static string TailWindow(string text, int maxChars)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (maxChars <= 0)
+        {
+            return string.Empty;
+        }
+
+        return text.Length <= maxChars ? text : text[^maxChars..];
+    }
+
+    /// <summary>
     /// Splits the preview into the two runs the pill renders: settled text and
     /// the provisional hypothesis.
     ///

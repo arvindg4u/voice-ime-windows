@@ -28,6 +28,18 @@ public partial class OverlayWindow : Window
     public const double WaveBarGap = 3;
     public const double ErrorAutoHideSeconds = 3;
 
+    /// <summary>
+    /// Most characters of transcript the preview keeps.
+    ///
+    /// <para>A single-line TextBlock is re-measured on every interim update, so
+    /// without a bound the cost of each update grows with the length of the
+    /// recording — a two-minute dictation reaches ~1,800 characters and every
+    /// revision re-measures all of them. The window is far wider than the pill,
+    /// so the cut is always scrolled off-screen and invisible; it exists purely
+    /// to keep the measure O(1) per update.</para>
+    /// </summary>
+    public const int PreviewTailChars = 400;
+
     // Visibility cached in a Volatile flag so the ~30 Hz level callback does
     // one read, not a dispatcher call (Handy OVERLAY_ENABLED pattern).
     private int _visibleFlag;
@@ -361,7 +373,10 @@ public partial class OverlayWindow : Window
         PreviewScroll.Visibility = showPreview ? Visibility.Visible : Visibility.Collapsed;
         if (showPreview)
         {
-            var (finalsRun, interimRun) = OverlayState.PreviewRuns(finals, interim);
+            // Bound the working text before it reaches layout.
+            var (finalsRun, interimRun) = OverlayState.PreviewRuns(
+                OverlayState.TailWindow(finals, PreviewTailChars),
+                OverlayState.TailWindow(interim, PreviewTailChars));
             PreviewFinals.Text = finalsRun;
             PreviewInterim.Text = interimRun;
             ScrollPreviewToTail();

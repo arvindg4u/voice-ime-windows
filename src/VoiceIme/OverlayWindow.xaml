@@ -103,6 +103,17 @@
                               VerticalAlignment="Center"
                               Focusable="False"
                               AutomationProperties.Name="Live transcription preview">
+                    <!-- Leading-edge fade: words dissolve as they leave rather
+                         than being guillotined by the clip, which is what makes
+                         the motion read as "the old words disappearing" instead
+                         of a hard cut. Purely decorative — the clip still
+                         happens at the same place. -->
+                    <ScrollViewer.OpacityMask>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="Transparent" Offset="0.0" />
+                            <GradientStop Color="#FF000000" Offset="0.12" />
+                        </LinearGradientBrush>
+                    </ScrollViewer.OpacityMask>
                     <TextBlock x:Name="PreviewText" TextWrapping="NoWrap"
                                HorizontalAlignment="Left" VerticalAlignment="Center"
                                FontSize="12">
