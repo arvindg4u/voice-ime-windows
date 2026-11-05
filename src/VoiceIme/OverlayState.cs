@@ -73,6 +73,27 @@ public sealed record OverlayState(OverlayPhase Phase, float Level, string? Messa
     }
 
     /// <summary>
+    /// Splits the preview into the two runs the pill renders: settled text and
+    /// the provisional hypothesis.
+    ///
+    /// <para>A separating space is prepended to the interim run only when both
+    /// parts are present, so the two runs concatenate into exactly
+    /// <see cref="FormatPreview"/>'s output — one space between them, none
+    /// dangling at the end.</para>
+    /// </summary>
+    internal static (string Finals, string Interim) PreviewRuns(string finals, string interim)
+    {
+        var head = finals.Trim();
+        var tail = interim.Trim();
+        if (tail.Length == 0)
+        {
+            return (head, string.Empty);
+        }
+
+        return head.Length == 0 ? (string.Empty, tail) : (head, " " + tail);
+    }
+
+    /// <summary>
     /// Moves to a new phase, resetting the level (a fresh phase starts flat)
     /// and replacing the message.
     /// </summary>

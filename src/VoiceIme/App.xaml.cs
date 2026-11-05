@@ -947,7 +947,9 @@ public partial class App : System.Windows.Application
         {
             _liveInterim = text;
         }
-        _overlay?.SetPreview(OverlayState.FormatPreview(_liveFinals, _liveInterim));
+        // Pass the two parts separately so the pill can render settled text
+        // solid and the in-flight hypothesis dimmed.
+        _overlay?.SetPreview(_liveFinals, _liveInterim);
     }
 
     /// <summary>
@@ -1463,7 +1465,7 @@ public partial class App : System.Windows.Application
         _liveInterim = string.Empty;
         try
         {
-            _overlay?.SetPreview(string.Empty);
+            _overlay?.SetPreview(string.Empty, string.Empty);
         }
         catch
         {

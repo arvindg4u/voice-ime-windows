@@ -79,18 +79,48 @@
                 </Ellipse>
             </Grid>
 
-            <!-- Center: waveform | "Sending…" | error message (one visible). -->
+            <!-- Center: waveform | interim preview | "Sending..." | error (one visible). -->
             <Grid Grid.Column="1" VerticalAlignment="Center">
+
+                <!-- Interim transcript: a rolling tail. New words appear on the
+                     right as you speak and old ones slide off the left, so what
+                     is on screen is always the end of the sentence.
+
+                     This replaced TextTrimming="CharacterEllipsis", which trims
+                     the END — it kept the OLDEST words and hid the newest, so a
+                     long dictation froze on an early fragment ending in "…"
+                     while the user was still talking.
+
+                     HorizontalScrollBarVisibility="Hidden" is deliberate rather
+                     than "Disabled": Hidden constrains content to the viewport
+                     and still allows programmatic scrolling, whereas Disabled
+                     would make ScrollToHorizontalOffset a no-op. -->
+                <ScrollViewer x:Name="PreviewScroll" Visibility="Collapsed"
+                              HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Disabled"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              Focusable="False"
+                              AutomationProperties.Name="Live transcription preview">
+                    <TextBlock x:Name="PreviewText" TextWrapping="NoWrap"
+                               HorizontalAlignment="Left" VerticalAlignment="Center"
+                               FontSize="12">
+                        <!-- Settled text reads solid; the in-flight hypothesis is
+                             dimmed, so the user can tell which words the model
+                             has committed to and which are still provisional. -->
+                        <Run x:Name="PreviewFinals"
+                             Foreground="{DynamicResource TextPrimary}" /><Run
+                            x:Name="PreviewInterim"
+                            Foreground="{DynamicResource TextMuted}" />
+                    </TextBlock>
+                </ScrollViewer>
+
                 <StackPanel x:Name="WavePanel" Orientation="Horizontal" Height="18"
                             HorizontalAlignment="Center" VerticalAlignment="Center" />
                 <TextBlock x:Name="SendingLabel" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           Text="Sending…" />
-                <TextBlock x:Name="PreviewText" Visibility="Collapsed"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"
-                           FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           MaxWidth="130" TextTrimming="CharacterEllipsis" />
+                           Text="Sending..." />
                 <TextBlock x:Name="ErrorText" Visibility="Collapsed"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="12" Foreground="{DynamicResource ErrorText}"

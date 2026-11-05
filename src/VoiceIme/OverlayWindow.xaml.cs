@@ -31,7 +31,8 @@ public partial class OverlayWindow : Window
     // one read, not a dispatcher call (Handy OVERLAY_ENABLED pattern).
     private int _visibleFlag;
     private volatile float _level;
-    private volatile string _preview = string.Empty;
+    private volatile string _previewFinals = string.Empty;
+    private volatile string _previewInterim = string.Empty;
     private string _mode = OverlayModes.Full;
     private OverlayState _state = OverlayState.Initial;
     private readonly DispatcherTimer _timer;
@@ -98,7 +99,8 @@ public partial class OverlayWindow : Window
         _state = OverlayState.Initial.WithPhase(
             phase, phase == OverlayPhase.Error ? "Something went wrong" : null);
         _level = 0f;
-        _preview = string.Empty;
+        _previewFinals = string.Empty;
+        _previewInterim = string.Empty;
         _phaseStartUtc = DateTime.UtcNow;
         _uploadTicks = 0;
         Render();
@@ -180,20 +182,25 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>
-    /// Shows the streaming hypothesis (finals + interim) during Recording.
-    /// Thread-safe via the <see cref="SetLevel"/> dispatcher pattern; an empty
-    /// string clears. Never shows outside
-    /// <see cref="OverlayPhase.Recording"/>.
+    /// Shows the streaming hypothesis during Recording, as a rolling tail: the
+    /// text is left-aligned in a horizontal scroller whose offset is pinned to
+    /// the end, so new words enter from the right and old ones leave the left.
+    /// Thread-safe via the <see cref="SetLevel"/> dispatcher pattern; empty
+    /// strings clear. Never shows outside <see cref="OverlayPhase.Recording"/>.
     /// </summary>
-    public void SetPreview(string previewText)
+    /// <param name="finals">Settled transcript, rendered in the primary ink.</param>
+    /// <param name="interim">Provisional hypothesis, rendered dimmed.</param>
+    public void SetPreview(string finals, string interim)
     {
-        ArgumentNullException.ThrowIfNull(previewText);
+        ArgumentNullException.ThrowIfNull(finals);
+        ArgumentNullException.ThrowIfNull(interim);
         if (Volatile.Read(ref _visibleFlag) == 0)
         {
             return;
         }
 
-        _preview = previewText;
+        _previewFinals = finals;
+        _previewInterim = interim;
         if (!Dispatcher.CheckAccess())
         {
             Dispatcher.BeginInvoke(RenderPreview);
@@ -201,6 +208,17 @@ public partial class OverlayWindow : Window
         }
 
         RenderPreview();
+    }
+
+    /// <summary>
+    /// Overload that takes the pre-joined single-line form. Kept so callers and
+    /// tests can push one string; it is split back apart for two-tone rendering
+    /// by treating everything as settled text.
+    /// </summary>
+    public void SetPreview(string previewText)
+    {
+        ArgumentNullException.ThrowIfNull(previewText);
+        SetPreview(previewText, string.Empty);
     }
 
     /// <summary>Current phase snapshot (pure <see cref="OverlayState"/>).</summary>
@@ -297,25 +315,46 @@ public partial class OverlayWindow : Window
     }
 
     /// <summary>
-    /// Shows the interim preview in the center slot while Recording with
+    /// Renders the interim preview in the center slot while Recording with
     /// non-empty text (taking the slot from the waveform); collapsed
     /// otherwise, so Uploading/Error never show it. UI thread only.
     /// </summary>
     private void RenderPreview()
     {
-        var preview = _preview;
+        var finals = _previewFinals;
+        var interim = _previewInterim;
         var showPreview = _state.Phase == OverlayPhase.Recording
-            && preview.Length > 0;
-        PreviewText.Visibility = showPreview ? Visibility.Visible : Visibility.Collapsed;
+            && (finals.Length > 0 || interim.Length > 0);
+        PreviewScroll.Visibility = showPreview ? Visibility.Visible : Visibility.Collapsed;
         if (showPreview)
         {
-            PreviewText.Text = preview;
+            var (finalsRun, interimRun) = OverlayState.PreviewRuns(finals, interim);
+            PreviewFinals.Text = finalsRun;
+            PreviewInterim.Text = interimRun;
+            ScrollPreviewToTail();
         }
 
         var showWaveform = _state.Phase == OverlayPhase.Recording
             && !showPreview
             && string.Equals(_mode, OverlayModes.Full, StringComparison.Ordinal);
         WavePanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Pins the preview scroller to the end so the newest words are the visible
+    /// ones.
+    ///
+    /// <para>Deferred to <see cref="DispatcherPriority.Loaded"/> because the
+    /// extent is not recalculated until after the new text has been measured —
+    /// scrolling synchronously here would clamp to the *previous* extent and
+    /// leave the view one update behind.</para>
+    /// </summary>
+    private void ScrollPreviewToTail()
+    {
+        PreviewScroll.UpdateLayout();
+        Dispatcher.BeginInvoke(
+            new Action(() => PreviewScroll.ScrollToHorizontalOffset(double.MaxValue)),
+            DispatcherPriority.Loaded);
     }
 
     private void RenderWaveform()
