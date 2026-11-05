@@ -90,8 +90,19 @@ public sealed class ThemeTokenAuditTests
 
             foreach (var line in File.ReadLines(file))
             {
-                // Ignore comments — prose may mention a colour legitimately.
                 var trimmed = line.TrimStart();
+
+                // Opacity masks are alpha geometry, not theme colour: the hex
+                // here is transparency (0x00 -> 0xFF), and it must be achromatic
+                // because only the luminance of an OpacityMask matters. A
+                // semantic token would be actively wrong — a theme swap would
+                // change how much of the text is visible.
+                if (trimmed.StartsWith("<GradientStop", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // Ignore comments — prose may mention a colour legitimately.
                 if (trimmed.StartsWith("<!--", StringComparison.Ordinal) ||
                     trimmed.StartsWith("//", StringComparison.Ordinal))
                 {
