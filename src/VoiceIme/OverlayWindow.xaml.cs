@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 
@@ -39,6 +40,7 @@ public partial class OverlayWindow : Window
     private readonly DispatcherTimer _errorTimer;
     private DateTime _phaseStartUtc = DateTime.UtcNow;
     private int _uploadTicks;
+    private double _lastExtentWidth;
     private readonly System.Windows.Shapes.Rectangle[] _bars = new System.Windows.Shapes.Rectangle[WaveBarCount];
 
     /// <summary>Invoked (UI thread) when the cancel button is pressed.</summary>
@@ -101,6 +103,7 @@ public partial class OverlayWindow : Window
         _level = 0f;
         _previewFinals = string.Empty;
         _previewInterim = string.Empty;
+        _lastExtentWidth = 0;
         _phaseStartUtc = DateTime.UtcNow;
         _uploadTicks = 0;
         Render();
@@ -292,6 +295,36 @@ public partial class OverlayWindow : Window
 
         RefreshTimer();
         RenderWaveform();
+
+        // Announce the phase transition to a screen reader. The dictation pill
+        // is the only feedback a blind user gets that recording is live, and it
+        // is non-focusable so it can be discovered no other way. Only the
+        // phase is announced — never the interim transcript, which would be
+        // constant chatter.
+        AnnouncePhase();
+    }
+
+    /// <summary>
+    /// Announces the phase transition to assistive technology.
+    ///
+    /// <para>The pill is the only signal that recording is live, and it is
+    /// deliberately non-focusable, so a screen-reader user cannot reach it by
+    /// navigation — a forced notification is the only channel. Only the phase
+    /// is announced; the streaming transcript never is, because announcing
+    /// every interim token is the "chatty" failure WCAG 4.1.3 warns about.</para>
+    /// </summary>
+    private void AnnouncePhase()
+    {
+        var message = _state.Phase switch
+        {
+            OverlayPhase.Recording => "Recording. Press Escape to cancel.",
+            OverlayPhase.Uploading => "Transcribing.",
+            OverlayPhase.Error => _state.Message ?? "Dictation failed.",
+            _ => null,
+        };
+
+        // Errors are worth interrupting for; recording/sending are not.
+        LiveRegion.Notify(this, message!, important: _state.Phase == OverlayPhase.Error);
     }
 
     private void RefreshTimer()
@@ -332,6 +365,7 @@ public partial class OverlayWindow : Window
             PreviewFinals.Text = finalsRun;
             PreviewInterim.Text = interimRun;
             ScrollPreviewToTail();
+            SlideInNewText();
         }
 
         var showWaveform = _state.Phase == OverlayPhase.Recording
@@ -344,10 +378,16 @@ public partial class OverlayWindow : Window
     /// Pins the preview scroller to the end so the newest words are the visible
     /// ones.
     ///
-    /// <para>Deferred to <see cref="DispatcherPriority.Loaded"/> because the
-    /// extent is not recalculated until after the new text has been measured —
-    /// scrolling synchronously here would clamp to the *previous* extent and
-    /// leave the view one update behind.</para>
+    /// <para>Layout is forced first because the extent is only recalculated
+    /// during the measure pass — scrolling before that clamps to the *previous*
+    /// extent and leaves the pill one update behind. The deferred call is
+    /// belt-and-braces for the case where the scroller just became visible in
+    /// this same pass.</para>
+    ///
+    /// <para><c>double.MaxValue</c> is used rather than the computed width: it
+    /// clamps to <c>ScrollableWidth</c>, so it is correct regardless of any
+    /// drift in our own arithmetic — and Display-mode text metrics mean a
+    /// hand-computed width would not match anyway.</para>
     /// </summary>
     private void ScrollPreviewToTail()
     {
@@ -355,6 +395,41 @@ public partial class OverlayWindow : Window
         Dispatcher.BeginInvoke(
             new Action(() => PreviewScroll.ScrollToHorizontalOffset(double.MaxValue)),
             DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// Slides the text left by exactly the amount it grew, so new words appear
+    /// to push in from the right instead of teleporting into place.
+    ///
+    /// <para>Deliberately a <see cref="TranslateTransform"/> and not an
+    /// animation of the scroll offset: the offset is a read-only DP, and
+    /// animating a helper value at the overlay's update rate would have
+    /// successive animations fighting each other. A render transform leaves
+    /// scroll state untouched, so an update arriving mid-flight cannot desync
+    /// the pinned position.</para>
+    /// </summary>
+    private void SlideInNewText()
+    {
+        var extent = PreviewText.ActualWidth;
+        var growth = extent - _lastExtentWidth;
+        _lastExtentWidth = extent;
+
+        // Nothing was added (or the text shrank as the hypothesis was corrected),
+        // so there is no motion to convey.
+        if (growth <= 0.5)
+        {
+            PreviewText.RenderTransform = null;
+            return;
+        }
+
+        var slide = new TranslateTransform(growth, 0);
+        PreviewText.RenderTransform = slide;
+        var animation = new DoubleAnimation(growth, 0, TimeSpan.FromMilliseconds(160))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.Stop,
+        };
+        slide.BeginAnimation(TranslateTransform.XProperty, animation);
     }
 
     private void RenderWaveform()

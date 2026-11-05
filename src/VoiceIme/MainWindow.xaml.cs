@@ -212,6 +212,10 @@ public partial class MainWindow : Window
         StatusIcon.Text = glyph;
         StatusIcon.SetResourceReference(TextBlock.ForegroundProperty, iconBrush);
         StatusText.SetResourceReference(TextBlock.ForegroundProperty, textBrush);
+
+        // LiveSetting alone announces nothing — the peer has to raise the
+        // event after the text changes.
+        LiveRegion.Announce(StatusText);
     }
 
     /// <summary>Convenience: report a failure through the footer.</summary>

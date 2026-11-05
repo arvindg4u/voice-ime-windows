@@ -98,6 +98,7 @@
                 <ScrollViewer x:Name="PreviewScroll" Visibility="Collapsed"
                               HorizontalScrollBarVisibility="Hidden"
                               VerticalScrollBarVisibility="Disabled"
+                              ClipToBounds="True"
                               HorizontalAlignment="Stretch"
                               VerticalAlignment="Center"
                               Focusable="False"
