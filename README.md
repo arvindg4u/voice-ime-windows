@@ -16,23 +16,49 @@ core architecture, native C# port.
 [![C#](https://img.shields.io/badge/C%23-12-239120?style=flat-square&logo=csharp)](https://learn.microsoft.com/dotnet/csharp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-[Features](#-features) · [Quick start](#-quick-start) · [How it works](#-how-it-works) · [Architecture](#️-architecture) · [Privacy](#-privacy--security)
+[Features](#-features) · [Quick start](#-quick-start) · [How it works](#-how-it-works) · [Architecture](#-architecture) · [Privacy](#-privacy--security)
 
 </div>
 
 ---
+
+<!--
+  DEMO — replace the placeholder below with a short screen recording.
+
+  Record with ScreenToGif (free, Windows): https://www.screentogif.com/
+  Keep it under ~10 s and show the whole loop, because the value is only
+  obvious when seen:
+    1. focus a text field (Notepad or a browser)
+    2. press Ctrl+Shift+Space — the pill appears with the live transcript
+       rolling in as you speak
+    3. press it again — the text lands in the field
+
+  Export as GIF (small, autoplays in the README) to docs/demo.gif, then swap
+  the block for:
+      <img src="docs/demo.gif" alt="Dictating into Notepad with Ctrl+Shift+Space" width="720">
+
+  A GIF is worth more here than any feature list: it shows the three things a
+  reader cannot infer from prose — the hotkey, the live preview, and that text
+  really does land in the app they are already using.
+-->
+<p align="center">
+  <em>📹 Demo GIF goes here — see the comment above <code>docs/demo.gif</code></em>
+</p>
+
+---
+
 
 ## Table of contents
 
 - [Why a Windows twin](#why-a-windows-twin)
 - [✨ Features](#-features)
 - [🚀 Quick start](#-quick-start)
-- [⚙️ Configuration](#️-configuration)
+- [⚙️ Configuration](#-configuration)
 - [🔄 Key rotation](#-key-rotation)
 - [💬 Custom prompt](#-custom-prompt)
 - [🧠 How it works](#-how-it-works)
-- [🏗️ Architecture](#️-architecture)
-- [🛠️ Build from source](#️-build-from-source)
+- [🏗️ Architecture](#-architecture)
+- [🛠️ Build from source](#-build-from-source)
 - [✅ Testing](#-testing)
 - [📏 Limits](#-limits)
 - [🔒 Privacy & security](#-privacy--security)
@@ -69,6 +95,11 @@ for Windows keeps the Android core (record 16 kHz WAV → Gemini
   chat apps: anywhere with a text field.
 - **Tray-first** — `NotifyIcon` owns the lifecycle: Dictate / Settings /
   History / Quit. No window clutter.
+- **Live streaming models** — model names containing `-live`, `native-audio`
+  or `-dialog` stream over a WebSocket (`bidiGenerateContent`) instead of
+  buffering: you see interim text in the pill while you are still speaking, and
+  the final lands faster. Everything else uses the REST path. Nothing to
+  configure — the model name selects the transport.
 - **Voice pipeline** — 16 kHz mono 16-bit PCM → in-memory WAV → Gemini
   `generateContent` with base64 inline audio.
 - **Clipboard + Ctrl+V delivery** — transcript lands in the focused window;
@@ -81,8 +112,16 @@ for Windows keeps the Android core (record 16 kHz WAV → Gemini
   pinned survive eviction); pin / delete / clear-unpinned.
 - **Test button** — sends a 1-second 440 Hz tone through the full pipeline to
   verify keys/model/prompt before dictating.
+- **Live preview in the pill** — while recording, the interim transcript
+  scrolls in the floating pill as you speak: new words appear on the right,
+  old ones fade off the left, settled text is solid and the provisional guess
+  is dimmed. (Live models only.)
+- **Accessible** — visible keyboard focus on every control, AA contrast in both
+  light and dark themes (verified by tests), Windows High Contrast support, and
+  screen-reader announcements for recording/transcribing/errors.
+- **Light, dark and system themes** — follows Windows and updates live.
 - **State in the tray** — tooltip + balloon tips mirror
-  idle → recording → transcribing → pasted/error.
+  idle → recording → transcribing → sent/error.
 - **Resilient recording** — hotkey toggles start/stop, 5-min auto-stop, mic
   teardown off the UI thread.
 
@@ -135,7 +174,7 @@ DPAPI-encrypted at rest and never logged.
 | ----- | ----------------- | ------------ |
 | **Base URL** | `https://generativelanguage.googleapis.com/v1beta` | Gemini-compatible endpoint. Swap for a proxy without rebuilding. |
 | **API keys** | one key per line | Round-robin pool with 429 failover (see below). |
-| **Model** | `gemini-2.5-flash` | Model appended as `{baseUrl}/models/{model}:generateContent`. |
+| **Model** | `gemini-2.5-flash` | REST: appended as `{baseUrl}/models/{model}:generateContent`. A Live model name (`-live` / `native-audio` / `-dialog`) switches to the WebSocket streaming path instead — see [Features](#-features). |
 | **Custom prompt** | blank (disabled) | System instructions (max 2000 chars) under a *"User preferences:"* heading on every request, including Test. |
 
 ---
@@ -274,8 +313,9 @@ dotnet publish src/VoiceIme/VoiceIme.csproj -c Release -r win-x64 --self-contain
 - **Elevated windows excluded** — `SendInput` Ctrl+V can't reach apps running
   as Administrator unless Voice IME also runs elevated. Clipboard history still
   captures the transcript, so nothing is lost.
-- **Windows-only** — x64, Windows 10+. No ARM64 build yet (add a
-  `win-arm64` publish leg when needed).
+- **Windows-only** — x64, Windows 10+. An ARM64 build is wanted but not built
+  yet; it needs a `win-arm64` publish leg (see
+  [Contributing](#-contributing)) and runs under emulation until then.
 
 ---
 
@@ -285,8 +325,11 @@ dotnet publish src/VoiceIme/VoiceIme.csproj -c Release -r win-x64 --self-contain
   request. Nothing written to disk.
 - **DPAPI-encrypted keys** — `ProtectedData` CurrentUser scope; the settings
   file contains only ciphertext. Keys never logged.
-- **Minimal surface** — no installer, no admin, no services, no autostart
-  without your shortcut. Network egress is only to your configured Base URL.
+- **Minimal surface** — no admin rights, no background services, no telemetry.
+  The installer is a convenience (per-user, uninstallable); the portable EXE
+  needs none. Autostart is opt-in and just a shortcut you can remove.
+- **Network egress** — only to your configured Base URL, and only while
+  transcribing. Nothing else phones home.
 - **Explicit consent** — Windows mic permission prompt at first capture.
 
 > Found a vulnerability? Please open a **private security advisory** on GitHub
@@ -379,8 +422,20 @@ dotnet test VoiceIme.Windows.sln -c Release   # must stay green
 - **Issues:** Windows version, app version, model, exact tray/toast message.
 - **PRs:** keep the tray-first concept; add/update xUnit tests for logic;
   keep functions focused and errors explicit.
-- **No-goes:** installers/services, disk persistence of audio, unencrypted key
-  storage, new network endpoints without discussion.
+- **No-goes:** background services, disk persistence of audio (RAM only),
+  unencrypted key storage, new network endpoints without discussion. An
+  installer already exists (`installer/VoiceIme.iss`) — keeping it working is
+  fine; adding *new* install-time components/scheduled tasks is not.
+- **Wanted, not yet built** — these are good first issues:
+  - **Push-to-talk** — `ActivationModes` already declares
+    `push_to_talk`/`hold_or_toggle`, but every mode currently behaves as
+    toggle. The parser and settings round-trip exist; the coordinator is where
+    hold-detection lands.
+  - **`win-arm64`** — add a publish leg next to `win-x64` in both workflows and
+    an ARM64 artifact. Nothing in the code assumes x64 except the published
+    RID.
+  - **Offline fallback** — a local model (e.g. whisper.cpp) behind the same
+    `ITranscriptionTransport` seam, so dictation survives with no network.
 
 ---
 
