@@ -62,6 +62,7 @@ core architecture, native C# port.
 - [✅ Testing](#-testing)
 - [📏 Limits](#-limits)
 - [🔒 Privacy & security](#-privacy--security)
+  - [Where your audio goes](#where-your-audio-goes)
 - [❓ FAQ & troubleshooting](#-faq--troubleshooting)
 - [🤝 Contributing](#-contributing)
 - [🙏 Acknowledgments](#-acknowledgments)
@@ -321,8 +322,13 @@ dotnet publish src/VoiceIme/VoiceIme.csproj -c Release -r win-x64 --self-contain
 
 ## 🔒 Privacy & security
 
-- **Memory-only audio** — recordings live in RAM and are zeroed after each
-  request. Nothing written to disk.
+- **Audio is never written to disk** — recordings live in RAM and are zeroed
+  after each request. What *is* persisted locally: your settings (keys
+  encrypted) and transcript history in `%AppData%\VoiceIme\clips.json`, which
+  is **plain text** — clear it from History or lower the cap in Settings.
+- **Audio does leave your machine** — it is sent to the Gemini API to be
+  transcribed. What happens to it there depends on your API tier: see
+  [Where your audio goes](#where-your-audio-goes).
 - **DPAPI-encrypted keys** — `ProtectedData` CurrentUser scope; the settings
   file contains only ciphertext. Keys never logged.
 - **Minimal surface** — no admin rights, no background services, no telemetry.
@@ -331,6 +337,29 @@ dotnet publish src/VoiceIme/VoiceIme.csproj -c Release -r win-x64 --self-contain
 - **Network egress** — only to your configured Base URL, and only while
   transcribing. Nothing else phones home.
 - **Explicit consent** — Windows mic permission prompt at first capture.
+
+### Where your audio goes
+
+Voice IME has no server of its own — the only egress is your configured Base URL
+(Google's Gemini API by default), and only while transcribing.
+
+**What Google does with it depends on your API tier** ([Gemini API Additional
+Terms](https://ai.google.dev/gemini-api/terms), effective 2026-03-23 — check that
+page, these terms change):
+
+| Your key | Google's use of your audio and transcript |
+| --- | --- |
+| **Free tier** — an AI Studio key with no billing account | Used "to provide, improve, and develop Google products and services and machine learning technologies". Human reviewers may read, annotate and process your input and output. Google's own guidance: *"Do not submit sensitive, confidential, or personal information to the Unpaid Services."* |
+| **Paid tier** — a Cloud project with billing enabled | Not used to improve Google products. Still logged for a limited period to detect abuse and policy violations, and may be cached transiently. |
+
+**Practical advice:** if you dictate anything confidential — work notes, messages,
+anything with personal data — use a billing-enabled key, or don't dictate it. On
+the free tier, treat every utterance as potentially read by a human reviewer.
+
+> **The free tier is not for apps you hand to other people.** Google's terms say
+> you "may use only Paid Services when making API Clients available to users in
+> the European Economic Area, Switzerland, or the United Kingdom." If you fork
+> this and ship it to others in those regions, you need billing enabled.
 
 > Found a vulnerability? Please open a **private security advisory** on GitHub
 > instead of a public issue.
