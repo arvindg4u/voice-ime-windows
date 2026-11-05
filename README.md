@@ -224,7 +224,7 @@ stateDiagram-v2
     [*] --> IDLE : tray ready
     IDLE --> RECORDING : hotkey / tray Dictate
     RECORDING --> UPLOADING : hotkey / 5-min auto-stop
-    UPLOADING --> IDLE : pasted ✓
+    UPLOADING --> IDLE : sent to your app
     UPLOADING --> ERROR : empty / network / 429-all / no-audio
     ERROR --> RECORDING : dictate again
     ERROR --> IDLE : new field
