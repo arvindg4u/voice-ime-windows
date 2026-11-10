@@ -147,6 +147,9 @@ public partial class App : System.Windows.Application
         // the old order applied "system" unconditionally, so a user who chose
         // Dark/Light got the wrong palette until they reopened the About view.
         _settings = SettingsStore.Load();
+        // Task 8: the persisted history cap drives the store, not a hardcoded
+        // 100. Applied before any view binds so the file matches on launch.
+        _clips.SetLimit(_settings.HistoryLimit);
         ThemeManager.ApplyTheme(ThemeManager.ResolveTheme(_settings.Theme));
 
         // Follow the OS theme live while the preference is "system": Windows
@@ -452,6 +455,16 @@ public partial class App : System.Windows.Application
         RefreshMenu();
         SetTray(TrayStateText.TooltipFor(DictationState.Recording, _settings.Hotkey));
         ShowOverlay(OverlayPhase.Recording);
+
+        // Dictation takes over the single shared recorder: end a running mic
+        // test first so it neither seeds this capture nor leaves its button
+        // stuck on "Stop".
+        if (_mainWindow?.SectionView(MainSection.General) is Views.GeneralSettingsView general
+            && general.IsMicTestRunning)
+        {
+            general.StopMicTestIfRunning();
+        }
+
         if (MicrophoneDevices.ListNames().Count == 0)
         {
             _coordinator.ReportStartResult(
@@ -479,7 +492,9 @@ public partial class App : System.Windows.Application
 
         try
         {
-            await Task.Run(() => _recorder.Start(), token);
+            await Task.Run(
+                () => _recorder.Start(MicrophoneDevices.ResolveDeviceNumber(_settings.Microphone)),
+                token);
             Logger.LogLatency("hotkey_to_capture", DateTimeOffset.UtcNow - hotkeyAt);
         }
         catch (OperationCanceledException)
@@ -1532,7 +1547,19 @@ public partial class App : System.Windows.Application
             HotkeyChord.TryParse(_settings.Hotkey, out modifiers, out vk);
         }
 
-        _hotkeyWindow.Register(modifiers, vk);
+        if (!_hotkeyWindow.Register(modifiers, vk))
+        {
+            // Another app already owns the chord. The registration failing
+            // silently would leave the user pressing a dead hotkey with no
+            // explanation; the tray path still works, so say so.
+            Logger.Warning($"hotkey not registered: {_settings.Hotkey}");
+            _notifier.Notify(
+                "Voice IME",
+                $"{_settings.Hotkey} is already used by another app — dictate from the tray, "
+                    + "or pick a different hotkey in Settings.",
+                NotificationSeverity.Warning,
+                secrets: _settings.ApiKeys);
+        }
     }
 
     private void AttachLiveHotkey(MainWindow window)
@@ -1546,6 +1573,12 @@ public partial class App : System.Windows.Application
 
             general.Saved -= RefreshTrayTextFromSave;
             general.Saved += RefreshTrayTextFromSave;
+            // Task 6 mic test: the view owns no recorder, so it asks the app to
+            // open/close the single shared capture stream. Idempotent subscribe.
+            general.MicTestStarted -= StartMicLevelTest;
+            general.MicTestStarted += StartMicLevelTest;
+            general.MicTestStopped -= StopMicLevelTest;
+            general.MicTestStopped += StopMicLevelTest;
         }
 
         // Task 8: Advanced saves apply live — autostart shortcut follows the
@@ -1556,6 +1589,21 @@ public partial class App : System.Windows.Application
         {
             advanced.Saved -= ApplyAdvancedSave;
             advanced.Saved += ApplyAdvancedSave;
+        }
+
+        // A hidden window must not leave the mic-test capture running behind an
+        // invisible meter. Idempotent subscribe — AttachLiveHotkey runs on
+        // every open.
+        window.IsVisibleChanged -= OnMainWindowVisibilityChanged;
+        window.IsVisibleChanged += OnMainWindowVisibilityChanged;
+    }
+
+    private void OnMainWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is false
+            && _mainWindow?.SectionView(MainSection.General) is Views.GeneralSettingsView general)
+        {
+            general.StopMicTestIfRunning();
         }
     }
 
@@ -1569,6 +1617,45 @@ public partial class App : System.Windows.Application
     {
         ApplyAutostartSetting();
         EnforceTrayGuard();
+        // The Advanced screen owns the history cap; apply it live so a lowered
+        // limit evicts immediately rather than only on the next dictation.
+        _clips.SetLimit(_settings.HistoryLimit);
+    }
+
+    /// <summary>
+    /// Starts the level-only capture behind the General screen's microphone
+    /// test. Reuses the single <see cref="AudioRecorder"/> (no second stream)
+    /// and respects the persisted microphone selection; refuses while a
+    /// dictation is busy so it cannot steal an in-flight recording.
+    /// </summary>
+    private void StartMicLevelTest()
+    {
+        if (_coordinator.State != DictationState.Idle)
+        {
+            return;
+        }
+
+        try
+        {
+            _recorder.Start(MicrophoneDevices.ResolveDeviceNumber(_settings.Microphone));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"mic test start failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>Stops the mic test capture (best effort; safe when not running).</summary>
+    private void StopMicLevelTest()
+    {
+        try
+        {
+            _recorder.Cancel();
+        }
+        catch
+        {
+            // Best effort — the recorder may already be gone at shutdown.
+        }
     }
 
     private MainWindow? _mainWindow;

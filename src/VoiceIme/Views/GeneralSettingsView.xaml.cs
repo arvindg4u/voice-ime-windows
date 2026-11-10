@@ -25,7 +25,6 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
 
     private readonly SettingsStore _settings;
     private readonly Func<IReadOnlyList<string>> _listMicrophones;
-    private readonly Func<IReadOnlyList<string>> _listOutputDevices;
     private readonly Action<SettingsStore> _saver;
 
     /// <summary>
@@ -59,16 +58,20 @@ public partial class GeneralSettingsView : System.Windows.Controls.UserControl
         SettingsStore settings,
         IHotkeyRegistrar registrar,
         Func<IReadOnlyList<string>> listMicrophones,
-        Action<SettingsStore>? saver = null,
-        Func<IReadOnlyList<string>>? listOutputDevices = null)
+        Action<SettingsStore>? saver = null)
     {
         _settings = settings;
         HotkeyRegistrar = registrar;
         _listMicrophones = listMicrophones;
-        _listOutputDevices = listOutputDevices ?? OutputDevices.ListNames;
         _saver = saver ?? (static s => s.Save());
         InitializeComponent();
-        Unloaded += (_, _) => EndCaptureMode();
+        Unloaded += (_, _) =>
+        {
+            // Leaving the section/window must not leave the shared recorder
+            // capturing for a meter nobody can see.
+            EndCaptureMode();
+            StopMicTestIfRunning();
+        };
         LoadFromSettings();
         _initializing = false;
     }

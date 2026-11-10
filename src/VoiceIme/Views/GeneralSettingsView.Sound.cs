@@ -35,12 +35,22 @@ public partial class GeneralSettingsView
     internal bool IsMicTestRunning => _micTestRunning;
 
     /// <summary>
+    /// Raised when the mic test starts so the host can open the shared capture
+    /// stream — the view owns no recorder. The host ignores this while the
+    /// dictation pipeline is busy.
+    /// </summary>
+    internal event Action? MicTestStarted;
+
+    /// <summary>Raised when the mic test stops so the host can release the capture stream.</summary>
+    internal event Action? MicTestStopped;
+
+    /// <summary>
     /// Percent label for a display-gain value. Pure — unit-testable on any OS.
     /// </summary>
     internal static string FormatVolume(int volume) =>
         $"{SettingsStore.ClampVolume(volume)}%";
 
-    private bool _micTestRunning;
+    private volatile bool _micTestRunning;
 
     private void RefreshSoundGroup()
     {
@@ -130,6 +140,19 @@ public partial class GeneralSettingsView
         MicTestButton.Content = "Stop";
         MicTestHelp.Text = "Listening — speak normally. The bar should track your voice.";
         MicLevelBar.Value = 0;
+        MicTestStarted?.Invoke();
+    }
+
+    /// <summary>
+    /// Test seam (internal): stops the meter if it is running, so the host can
+    /// take the recorder back (dictation start) without leaving the button on.
+    /// </summary>
+    internal void StopMicTestIfRunning()
+    {
+        if (_micTestRunning)
+        {
+            StopMicTest();
+        }
     }
 
     private void StopMicTest()
@@ -139,17 +162,26 @@ public partial class GeneralSettingsView
         MicTestHelp.Text =
             "Speak to check the level meter moves. If it stays flat, the mic is muted or blocked.";
         MicLevelBar.Value = 0;
+        MicTestStopped?.Invoke();
     }
 
     /// <summary>
     /// Feeds a 0–1 input level into the meter. Called from the app's existing
-    /// recorder level feed; a no-op while the test is not running so the meter
-    /// stays still the rest of the time.
+    /// recorder level feed — which fires on the NAudio capture thread — so the
+    /// write is marshalled to the UI thread (a WPF property set off-thread
+    /// throws). A no-op while the test is not running so the meter stays still
+    /// the rest of the time.
     /// </summary>
     internal void OnInputLevel(float level01)
     {
         if (!_micTestRunning)
         {
+            return;
+        }
+
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnInputLevel(level01));
             return;
         }
 

@@ -30,7 +30,9 @@ public sealed class AudioRecorder : IDisposable
     /// <summary>
     /// Phase-3 streaming hook: raw 16-bit mono 16 kHz PCM per capture buffer,
     /// raised on the NAudio capture thread with a defensive copy (NAudio reuses
-    /// its buffer). Currently unwired; the REST path is unaffected.
+    /// its buffer). Subscribed by App for Live-model dictation (chunks are
+    /// buffered through <see cref="LivePcmPump"/>); the REST path does not use
+    /// it.
     /// </summary>
     public event Action<byte[]>? PcmChunkAvailable;
 
@@ -83,7 +85,7 @@ public sealed class AudioRecorder : IDisposable
         return out_;
     }
 
-    public void Start()
+    public void Start(int? deviceNumber = null)
     {
         if (_capture is not null) return;
         _pcm = new MemoryStream();
@@ -93,6 +95,14 @@ public sealed class AudioRecorder : IDisposable
             WaveFormat = new WaveFormat(SampleRate, 16, Channels),
             BufferMilliseconds = 100,
         };
+        // null means "leave the recorder on its default device" — used when the
+        // stored microphone is unset or has been unplugged (MicrophoneDevices
+        // resolves the name). NAudio reads this at StartRecording.
+        if (deviceNumber is int index && index >= 0)
+        {
+            _capture.DeviceNumber = index;
+        }
+
         _capture.DataAvailable += (_, e) =>
         {
             _pcm.Write(e.Buffer, 0, e.BytesRecorded);
@@ -106,16 +116,25 @@ public sealed class AudioRecorder : IDisposable
         _capture.StartRecording();
     }
 
-    /// <summary>Stops capture and returns the full WAV. Runs off the UI thread.</summary>
+    /// <summary>
+    /// Stops capture and returns the full WAV. Runs off the UI thread. The
+    /// token is accepted for API symmetry but no longer aborts disposal — a
+    /// pre-cancelled token must not skip <c>StopRecording</c>/<c>Dispose</c>;
+    /// callers re-check cancellation after this returns.
+    /// </summary>
     public async Task<byte[]> StopAsync(CancellationToken ct = default)
     {
         var capture = Interlocked.Exchange(ref _capture, null);
         if (capture is null || _pcm is null) return PcmToWav(Array.Empty<byte>());
         await Task.Run(() =>
         {
+            // No ct here: releasing the capture is mandatory, and a
+            // pre-cancelled token would make Task.Run skip this delegate and
+            // leak an actively-recording WaveInEvent. Cancellation semantics
+            // are preserved by the callers' token.ThrowIfCancellationRequested().
             try { capture.StopRecording(); } catch { /* already stopped */ }
             capture.Dispose();
-        }, ct);
+        });
         var pcm = _pcm.ToArray();
         _pcm.Dispose();
         _pcm = null;

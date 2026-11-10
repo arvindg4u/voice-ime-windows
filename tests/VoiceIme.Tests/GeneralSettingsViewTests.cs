@@ -391,14 +391,12 @@ public sealed class GeneralSettingsViewTests
         IHotkeyRegistrar registrar,
         IReadOnlyList<string> microphones,
         Action<GeneralSettingsView> body,
-        Action<SettingsStore>? saver = null,
-        IReadOnlyList<string>? outputs = null)
+        Action<SettingsStore>? saver = null)
     {
         StaTestHelper.TryRunOnSta(() =>
         {
             var view = new GeneralSettingsView(
-                store, registrar, () => microphones, saver ?? (_ => { }),
-                listOutputDevices: outputs is null ? OutputDevices.ListNames : () => outputs);
+                store, registrar, () => microphones, saver ?? (_ => { }));
             body(view);
         });
     }

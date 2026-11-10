@@ -63,6 +63,57 @@ public sealed class ClipboardStoreTests : IDisposable
         Assert.Equal(keep.Id, store.Entries[0].Id);
     }
 
+    [Fact]
+    public void SetLimit_ReEvictsExistingEntries_And_Persists()
+    {
+        var path = PathFor("e.json");
+        var store = new ClipboardStore(path);
+        for (var i = 0; i < 20; i++)
+        {
+            store.Add($"clip {i}");
+        }
+
+        store.SetLimit(5);
+
+        Assert.Equal(5, store.Limit);
+        Assert.Equal(5, store.Entries.Count);
+        // Oldest entries went first (newest-first ordering).
+        Assert.Equal("clip 19", store.Entries[0].Text);
+
+        // A lowered cap is on disk, so a fresh store loads the same count.
+        var reloaded = new ClipboardStore(path);
+        Assert.Equal(5, reloaded.Entries.Count);
+    }
+
+    [Fact]
+    public void SetLimit_BelowOne_ClampsToOne()
+    {
+        var store = new ClipboardStore(PathFor("f.json"));
+        store.Add("a");
+        store.Add("b");
+
+        store.SetLimit(0);
+
+        Assert.Equal(ClipboardStore.MinLimit, store.Limit);
+        Assert.Single(store.Entries);
+    }
+
+    [Fact]
+    public void Constructor_AppliesLimit_OnLoad()
+    {
+        var path = PathFor("g.json");
+        var seed = new ClipboardStore(path);
+        for (var i = 0; i < 20; i++)
+        {
+            seed.Add($"clip {i}");
+        }
+
+        var limited = new ClipboardStore(path, limit: 3);
+
+        Assert.Equal(3, limited.Limit);
+        Assert.Equal(3, limited.Entries.Count);
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_dir, recursive: true); } catch { /* ignore */ }

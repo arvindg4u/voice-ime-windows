@@ -109,8 +109,8 @@ for Windows keeps the Android core (record 16 kHz WAV → Gemini
   failover and even load spread (identical semantics to Android).
 - **User-shaped transcription** — custom system prompt (≤ 2000 chars) steers
   formatting, language, tone — including the Test button.
-- **Clipboard history** — every transcript saved to `%AppData%` (cap 100,
-  pinned survive eviction); pin / delete / clear-unpinned.
+- **Clipboard history** — every transcript saved to `%AppData%` (cap set by the
+  Advanced → History limit, default 100, pinned survive eviction); pin / delete / clear-unpinned.
 - **Test button** — sends a 1-second 440 Hz tone through the full pipeline to
   verify keys/model/prompt before dictating.
 - **Live preview in the pill** — while recording, the interim transcript
@@ -245,7 +245,7 @@ src/VoiceIme/                      # WPF WinExe, net8.0-windows
 ├── LlmClient.cs                   # REST transcription + key rotation
 ├── NativeInput.cs                 # RegisterHotKey + clipboard/Ctrl+V via SendInput
 ├── SettingsStore.cs               # DPAPI-encrypted settings (%AppData%)
-├── ClipboardStore.cs              # transcript history (cap 100, pin survives)
+├── ClipboardStore.cs              # transcript history (configurable cap, pin survives)
 ├── SettingsWindow.xaml(.cs)       # settings form + Test button
 └── HistoryWindow.xaml(.cs)        # history list (copy / pin / delete)
 

@@ -162,8 +162,8 @@ public static class Palette
     /// served hints, captions, footer text <em>and</em> disabled state). These
     /// aliases keep any not-yet-migrated consumer compiling and themed while
     /// views are converted to the semantic keys one by one. New code must not
-    /// use them — <see cref="Theme.TokenAudit"/> asserts the alias list only
-    /// ever shrinks.
+    /// use them — the <c>LegacyAliasCountOnlyShrinks</c> test asserts the alias
+    /// list only ever shrinks.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> LegacyAliases =
         new Dictionary<string, string>

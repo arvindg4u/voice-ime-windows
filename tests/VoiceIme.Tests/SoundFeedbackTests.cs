@@ -6,7 +6,7 @@ namespace VoiceIme.Tests;
 
 /// <summary>
 /// Task 6 pure sound/cancel helpers (display gain, arm decision, volume
-/// label, channel labels, output enumeration). No WPF construction — runs on
+/// label, channel labels). No WPF construction — runs on
 /// any OS, no STA needed. The post-paste tone itself is covered by the
 /// disabled-path no-op below; the enabled path needs Windows audio and runs
 /// on windows-latest CI via the speaker-test click path.
@@ -83,13 +83,27 @@ public sealed class SoundFeedbackTests
     }
 
     [Fact]
-    public void OutputDevices_ListNames_NeverThrows()
+    public void ResolveDeviceNumber_BlankOrUnset_FallsBackToDefault()
     {
-        // Headless CI has no audio stack — the output dropdown falls back to
-        // "System default" instead of throwing.
-        var names = OutputDevices.ListNames();
+        var names = new[] { "Mic A", "Mic B" };
+        Assert.Null(MicrophoneDevices.ResolveDeviceNumber(null, names));
+        Assert.Null(MicrophoneDevices.ResolveDeviceNumber("", names));
+        Assert.Null(MicrophoneDevices.ResolveDeviceNumber("   ", names));
+    }
 
-        Assert.NotNull(names);
+    [Fact]
+    public void ResolveDeviceNumber_Match_ReturnsIndex()
+    {
+        var names = new[] { "Mic A", "Mic B" };
+        Assert.Equal((int?)0, MicrophoneDevices.ResolveDeviceNumber("Mic A", names));
+        Assert.Equal((int?)1, MicrophoneDevices.ResolveDeviceNumber("Mic B", names));
+    }
+
+    [Fact]
+    public void ResolveDeviceNumber_UnknownDevice_FallsBackToDefault()
+    {
+        var names = new[] { "Mic A", "Mic B" };
+        Assert.Null(MicrophoneDevices.ResolveDeviceNumber("Unplugged", names));
     }
 
     [Fact]

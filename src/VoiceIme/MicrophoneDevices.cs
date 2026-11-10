@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NAudio.Wave;
 
@@ -35,5 +36,33 @@ public static class MicrophoneDevices
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// Maps the stored selection (the persisted product name, or "" for the
+    /// system default) to its NAudio device index. Returns null when the
+    /// selection is blank/unset or the device is no longer present — the caller
+    /// then leaves the recorder on its default device rather than failing the
+    /// capture. Pure over the supplied name list, so it unit-tests without an
+    /// audio stack.
+    /// </summary>
+    public static int? ResolveDeviceNumber(string? storedName, IReadOnlyList<string>? deviceNames = null)
+    {
+        if (string.IsNullOrWhiteSpace(storedName))
+        {
+            return null;
+        }
+
+        var names = deviceNames ?? ListNames();
+        var wanted = storedName.Trim();
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], wanted, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return null;
     }
 }

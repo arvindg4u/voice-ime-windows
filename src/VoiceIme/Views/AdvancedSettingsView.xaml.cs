@@ -10,9 +10,9 @@ namespace VoiceIme.Views;
 /// Output paste-method dropdown, and the History limit numeric (clamped
 /// 10–500). Viewmodel-less code-behind bound to <see cref="SettingsStore"/>
 /// — every write validates-then-commits and surfaces failures inline, never
-/// throws out of an event handler. Display + persist only: autostart/tray/
-/// overlay behavior and paste delivery stay untouched until T8 wires the
-/// shell (delivery keeps the existing fixed Ctrl+V path).
+/// throws out of an event handler. App executes the shell effects on save
+/// (autostart shortcut reconcile, tray guard, and the history cap); paste
+/// delivery uses the selected method.
 /// Hosted by <see cref="MainWindow"/> via
 /// RegisterSectionView(MainSection.Advanced, view).
 /// </summary>
