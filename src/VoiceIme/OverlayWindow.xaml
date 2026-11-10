@@ -137,14 +137,29 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="12" Foreground="{DynamicResource ErrorText}"
                            MaxWidth="130" TextTrimming="CharacterEllipsis" />
+
+                <!-- Transient notice: first-run finish/cancel hint or the
+                     elevated-target warning. Takes the center slot ahead of the
+                     waveform; set/cleared from code. -->
+                <TextBlock x:Name="NoticeText" Visibility="Collapsed"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           MaxWidth="150" TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Dictation notice" />
             </Grid>
 
-            <!-- Right: elapsed timer + cancel. -->
+            <!-- Right: elapsed timer + finish/cancel. Finish is the primary
+                 affordance (stop and paste); cancel discards. Reusing the
+                 rounded icon-button style for both. -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="TimerText" VerticalAlignment="Center" Margin="0,0,8,0"
                            FontFamily="{DynamicResource MonoFontFamily}" FontSize="12"
                            Foreground="{DynamicResource TextMuted}"
                            Text="0:00" />
+                <Button x:Name="FinishButton" Style="{DynamicResource OverlayCancelButton}"
+                        Content="✓" Margin="0,0,4,0" Click="OnFinishClick"
+                        AutomationProperties.Name="Finish and paste this dictation"
+                        ToolTip="Finish and paste" />
                 <Button x:Name="CancelButton" Style="{DynamicResource OverlayCancelButton}"
                         Content="✕" Click="OnCancelClick"
                         AutomationProperties.Name="Cancel dictation"

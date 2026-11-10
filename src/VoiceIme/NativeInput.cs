@@ -479,6 +479,38 @@ public static class NativeInput
     }
 
     /// <summary>
+    /// True when the current foreground window belongs to another process at a
+    /// higher integrity level than Voice IME — the one delivery failure the user
+    /// cannot fix by retrying. Used to warn on the dictation pill before the
+    /// paste is attempted (UIPI drops such input silently). Fail-open: an
+    /// uninspectable target reports false.
+    /// </summary>
+    public static bool IsForegroundTargetElevated()
+    {
+        try
+        {
+            var hwnd = GetForegroundWindow();
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var threadId = GetWindowThreadProcessId(hwnd, out var pid);
+            if (threadId == 0 || pid == 0 || pid == (uint)Environment.ProcessId)
+            {
+                return false;
+            }
+
+            return CompareIntegrityLevels(pid) > 0;
+        }
+        catch
+        {
+            // Token probe unavailable — fail open rather than cry wolf.
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Compares the target process's integrity level with our own.
     /// Returns 1 when the target is higher (the paste would be dropped),
     /// 0 when equal, -1 when lower. Throws when the level cannot be determined

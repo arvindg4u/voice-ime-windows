@@ -433,6 +433,20 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// Pill finish button: stop and transcribe exactly like the toggle hotkey.
+    /// Uses the never-debounced toggle entry — the button has no release edge,
+    /// and a quick finish right after a start must work.
+    /// </summary>
+    private void FinishRecording()
+    {
+        _coordinator.ActivationMode = _settings.ActivationMode;
+        if (_coordinator.OnToggleInput() == HotkeyCommand.StopRecording)
+        {
+            _ = StopAndTranscribeAsync();
+        }
+    }
+
     private void HandleAutoStop()
     {
         if (_coordinator.OnAutoStop() == HotkeyCommand.StopRecording)
@@ -455,6 +469,23 @@ public partial class App : System.Windows.Application
         RefreshMenu();
         SetTray(TrayStateText.TooltipFor(DictationState.Recording, _settings.Hotkey));
         ShowOverlay(OverlayPhase.Recording);
+
+        // Pill coaching/warning. An elevated target can never receive a
+        // synthesized paste (UIPI), so warn up front; otherwise teach the
+        // finish/cancel keys once, then never again.
+        if (NativeInput.IsForegroundTargetElevated())
+        {
+            _overlay?.SetNotice(
+                "Admin app — paste may fail", isWarning: true, duration: TimeSpan.FromSeconds(5));
+        }
+        else if (!_settings.SeenPillHint)
+        {
+            _overlay?.SetNotice(
+                $"{_settings.Hotkey} to finish · {_settings.CancelHotkey} to cancel",
+                duration: TimeSpan.FromSeconds(5));
+            _settings.SeenPillHint = true;
+            try { _settings.Save(); } catch { /* best effort */ }
+        }
 
         // Dictation takes over the single shared recorder: end a running mic
         // test first so it neither seeds this capture nor leaves its button
@@ -1333,6 +1364,7 @@ public partial class App : System.Windows.Application
 
         _overlay = new OverlayWindow();
         _overlay.CancelRequested += CancelRecording;
+        _overlay.FinishRequested += FinishRecording;
         _overlay.Configure(_settings.CancelHotkey, _settings.Hotkey);
     }
 

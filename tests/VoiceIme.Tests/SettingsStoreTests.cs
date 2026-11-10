@@ -794,6 +794,7 @@ public sealed class SettingsStoreTests
                 AutoSubmit = true,
                 PasteMethod = PasteMethods.ShiftInsert,
                 HistoryLimit = 250,
+                SeenPillHint = true,
             };
             store.Save();
 
@@ -806,6 +807,7 @@ public sealed class SettingsStoreTests
             Assert.True(reloaded.AutoSubmit);
             Assert.Equal(PasteMethods.ShiftInsert, reloaded.PasteMethod);
             Assert.Equal(250, reloaded.HistoryLimit);
+            Assert.True(reloaded.SeenPillHint);
         }
         finally
         {

@@ -72,6 +72,31 @@ public sealed class OverlayStateTests
     }
 
     [Fact]
+    public void WithNotice_SetsAndClears()
+    {
+        var state = new OverlayState(OverlayPhase.Recording, 0f);
+
+        var with = state.WithNotice("Admin app", isWarning: true);
+        Assert.Equal("Admin app", with.Notice);
+        Assert.True(with.NoticeIsWarning);
+
+        var cleared = with.WithNotice("   ");
+        Assert.Null(cleared.Notice);
+        Assert.False(cleared.NoticeIsWarning);
+    }
+
+    [Fact]
+    public void WithPhase_ClearsNotice()
+    {
+        var state = new OverlayState(OverlayPhase.Recording, 0f).WithNotice("hint");
+
+        var next = state.WithPhase(OverlayPhase.Uploading);
+
+        Assert.Null(next.Notice);
+        Assert.False(next.NoticeIsWarning);
+    }
+
+    [Fact]
     public void ComputePosition_BottomCenterWith40pxOffset()
     {
         var workArea = new Rect(0, 0, 1920, 1040); // 1080p minus 40px taskbar

@@ -84,6 +84,11 @@ public partial class OverlayWindow : Window
     private OverlayState _state = OverlayState.Initial;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _errorTimer;
+    private readonly DispatcherTimer _noticeTimer;
+
+    // Tracks the phase last announced so a re-render for a notice does not
+    // re-announce (a phase change always resets this in ShowCore).
+    private OverlayPhase? _announcedPhase;
     private DateTime _phaseStartUtc = DateTime.UtcNow;
     private int _uploadTicks;
     private double _lastExtentWidth;
@@ -133,6 +138,9 @@ public partial class OverlayWindow : Window
     /// <summary>Invoked (UI thread) when the cancel button is pressed.</summary>
     public event Action? CancelRequested;
 
+    /// <summary>Invoked (UI thread) when the finish (stop + paste) button is pressed.</summary>
+    public event Action? FinishRequested;
+
     /// <summary>
     /// Test seam: replaces the real <see cref="SystemParameters.WorkArea"/>
     /// (headless tests have no window station).
@@ -163,6 +171,14 @@ public partial class OverlayWindow : Window
 
         _errorTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(ErrorAutoHideSeconds) };
         _errorTimer.Tick += (_, _) => Hide();
+
+        _noticeTimer = new DispatcherTimer();
+        _noticeTimer.Tick += (_, _) =>
+        {
+            _noticeTimer.Stop();
+            _state = _state with { Notice = null };
+            Render();
+        };
 
         // WS_EX_NOACTIVATE/TOOLWINDOW: ShowActivated=False is not enough once
         // the user can click the buttons.
@@ -205,6 +221,36 @@ public partial class OverlayWindow : Window
         _dictationHotkey = string.IsNullOrWhiteSpace(dictationHotkey)
             ? HotkeyChord.DefaultChord
             : dictationHotkey.Trim();
+    }
+
+    /// <summary>
+    /// Shows a transient notice in the pill's center slot (the first-run key
+    /// hint or the elevated-target warning). Passing null/blank clears it.
+    /// When <paramref name="duration"/> is set the notice auto-clears, yielding
+    /// the slot back to the waveform/preview. Thread-safe; no-op when hidden.
+    /// </summary>
+    public void SetNotice(string? notice, bool isWarning = false, TimeSpan? duration = null)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => SetNotice(notice, isWarning, duration));
+            return;
+        }
+
+        if (Volatile.Read(ref _visibleFlag) == 0 && !string.IsNullOrWhiteSpace(notice))
+        {
+            return;
+        }
+
+        _state = _state.WithNotice(notice, isWarning);
+        _noticeTimer.Stop();
+        if (_state.Notice is not null && duration is TimeSpan d && d > TimeSpan.Zero)
+        {
+            _noticeTimer.Interval = d;
+            _noticeTimer.Start();
+        }
+
+        Render();
     }
 
     /// <summary>Shows the overlay in the given phase and positions it. Thread-safe.</summary>
@@ -251,6 +297,8 @@ public partial class OverlayWindow : Window
         _phaseStartUtc = DateTime.UtcNow;
         _uploadTicks = 0;
         _previewRenderQueued = false;
+        _noticeTimer.Stop();
+        _announcedPhase = null;
         Render();
         PositionBottomCenter();
         _timer.Start();
@@ -282,6 +330,7 @@ public partial class OverlayWindow : Window
 
         _timer.Stop();
         _errorTimer.Stop();
+        _noticeTimer.Stop();
         Volatile.Write(ref _visibleFlag, 0);
         if (IsVisible)
         {
@@ -437,6 +486,9 @@ public partial class OverlayWindow : Window
         // The timer shows the capture duration while recording and keeps
         // climbing while uploading (indeterminate — no backend streaming).
         TimerText.Visibility = recording || uploading ? Visibility.Visible : Visibility.Collapsed;
+        // Finish (stop + paste) is only meaningful while recording; during
+        // upload there is nothing to finish (cancel still aborts).
+        FinishButton.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
         ErrorText.Visibility = error ? Visibility.Visible : Visibility.Collapsed;
         if (error)
         {
@@ -465,6 +517,15 @@ public partial class OverlayWindow : Window
     /// </summary>
     private void AnnouncePhase()
     {
+        // Render runs again for notice updates (set/expire) without a phase
+        // change; announcing only on transition keeps the screen reader from
+        // repeating itself.
+        if (_announcedPhase == _state.Phase)
+        {
+            return;
+        }
+
+        _announcedPhase = _state.Phase;
         var message = _state.Phase switch
         {
             OverlayPhase.Recording =>
@@ -522,7 +583,25 @@ public partial class OverlayWindow : Window
             SlideInNewText();
         }
 
-        var showWaveform = _state.Phase == OverlayPhase.Recording && !showPreview;
+        // A transient notice (first-run key hint / elevated warning) takes the
+        // center slot ahead of the level cue.
+        var notice = _state.Phase == OverlayPhase.Recording && !showPreview ? _state.Notice : null;
+        if (notice is null)
+        {
+            NoticeText.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            NoticeText.Text = notice;
+            NoticeText.SetResourceReference(
+                System.Windows.Controls.TextBlock.ForegroundProperty,
+                _state.NoticeIsWarning ? "WarningText" : "TextMuted");
+            NoticeText.Visibility = Visibility.Visible;
+        }
+
+        var showWaveform = _state.Phase == OverlayPhase.Recording
+            && !showPreview
+            && notice is null;
         WavePanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
 
         // "minimal" keeps a compact 3-bar level cue (the recording is still
@@ -611,4 +690,7 @@ public partial class OverlayWindow : Window
 
     private void OnCancelClick(object sender, RoutedEventArgs e) =>
         CancelRequested?.Invoke();
+
+    private void OnFinishClick(object sender, RoutedEventArgs e) =>
+        FinishRequested?.Invoke();
 }

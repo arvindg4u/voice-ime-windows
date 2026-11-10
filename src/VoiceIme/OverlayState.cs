@@ -19,7 +19,12 @@ public enum OverlayPhase
 /// instances and never mutate — the window renders from snapshots. No WPF
 /// types here, so this is fully unit-testable on any OS.
 /// </summary>
-public sealed record OverlayState(OverlayPhase Phase, float Level, string? Message = null)
+public sealed record OverlayState(
+    OverlayPhase Phase,
+    float Level,
+    string? Message = null,
+    string? Notice = null,
+    bool NoticeIsWarning = false)
 {
     public static OverlayState Initial { get; } = new(OverlayPhase.Recording, 0f);
 
@@ -118,11 +123,29 @@ public sealed record OverlayState(OverlayPhase Phase, float Level, string? Messa
     }
 
     /// <summary>
-    /// Moves to a new phase, resetting the level (a fresh phase starts flat)
-    /// and replacing the message.
+    /// Moves to a new phase, resetting the level (a fresh phase starts flat),
+    /// replacing the message, and clearing any transient notice.
     /// </summary>
     public OverlayState WithPhase(OverlayPhase phase, string? message = null) =>
-        this with { Phase = phase, Level = 0f, Message = message };
+        this with
+        {
+            Phase = phase,
+            Level = 0f,
+            Message = message,
+            Notice = null,
+            NoticeIsWarning = false,
+        };
+
+    /// <summary>
+    /// Sets (or clears, with null/blank) the transient center notice shown
+    /// while recording — the first-run key hint or the elevated-target warning.
+    /// </summary>
+    public OverlayState WithNotice(string? notice, bool isWarning = false) =>
+        this with
+        {
+            Notice = string.IsNullOrWhiteSpace(notice) ? null : notice,
+            NoticeIsWarning = !string.IsNullOrWhiteSpace(notice) && isWarning,
+        };
 
     /// <summary>Sets the level, clamped to 0..1.</summary>
     public OverlayState WithLevel(float level) =>
