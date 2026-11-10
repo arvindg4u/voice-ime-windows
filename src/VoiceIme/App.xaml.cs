@@ -1366,6 +1366,18 @@ public partial class App : System.Windows.Application
         _overlay.CancelRequested += CancelRecording;
         _overlay.FinishRequested += FinishRecording;
         _overlay.Configure(_settings.CancelHotkey, _settings.Hotkey);
+        _overlay.SavedPosition = _settings.OverlayPosition;
+        _overlay.PositionChanged += SaveOverlayPosition;
+    }
+
+    /// <summary>
+    /// Persists the pill's dragged position so it reopens where the user left
+    /// it. Best effort — a failed save only costs the position.
+    /// </summary>
+    private void SaveOverlayPosition(double left, double top)
+    {
+        _settings.OverlayPosition = OverlayWindow.FormatPosition(left, top);
+        try { _settings.Save(); } catch { /* best effort */ }
     }
 
     /// <summary>

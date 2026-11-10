@@ -147,6 +147,28 @@ public sealed class OverlayStateTests
     }
 
     [Fact]
+    public void Position_RoundTripsThroughFormatAndParse()
+    {
+        var text = OverlayWindow.FormatPosition(1234.5, 800);
+
+        Assert.True(OverlayWindow.TryParsePosition(text, out var left, out var top));
+        Assert.Equal(1234.5, left);
+        Assert.Equal(800, top);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("nope")]
+    [InlineData("1,2,3")]
+    [InlineData("a,b")]
+    public void TryParsePosition_BadInput_ReturnsFalse(string? value)
+    {
+        Assert.False(OverlayWindow.TryParsePosition(value, out _, out _));
+    }
+
+    [Fact]
     public void Show_SetsSnapshotPhase_AndSetLevelUpdatesSnapshot()
     {
         if (!TryRunOnSta(window =>

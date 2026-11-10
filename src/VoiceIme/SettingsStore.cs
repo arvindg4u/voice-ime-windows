@@ -122,6 +122,13 @@ public sealed class SettingsStore
     public bool SeenPillHint { get; set; }
 
     /// <summary>
+    /// Last dragged pill position as "left,top" in DIPs, or "" to use the
+    /// default bottom-center placement. Additive, coerced by the reader, no
+    /// version bump.
+    /// </summary>
+    public string OverlayPosition { get; set; } = "";
+
+    /// <summary>
     /// The text the backend sends: the active library entry's text, falling
     /// back to the legacy field when nothing matches (e.g. a store built
     /// entirely by hand with prompts still empty). Never throws.
@@ -213,6 +220,7 @@ public sealed class SettingsStore
         Language = CoerceLanguage(Language, Warn);
         Channel = CoerceChannel(Channel, Warn);
         OutputDevice ??= "";
+        OverlayPosition ??= "";
         Volume = ClampVolume(Volume);
         CancelHotkey = CoerceCancelHotkey(CancelHotkey, Warn);
         Prompts = PromptLibrary.CoercePrompts(Prompts, Warn);
@@ -240,6 +248,7 @@ public sealed class SettingsStore
         Language = CoerceLanguage(Language);
         Channel = CoerceChannel(Channel);
         OutputDevice ??= "";
+        OverlayPosition ??= "";
         Volume = ClampVolume(Volume);
         CancelHotkey = CoerceCancelHotkey(CancelHotkey);
         Prompts = PromptLibrary.CoercePrompts(Prompts);
@@ -283,6 +292,7 @@ public sealed class SettingsStore
             activePrompt = ActivePrompt,
             seenHint = SeenHint,
             seenPillHint = SeenPillHint,
+            overlayPosition = OverlayPosition,
             smartMode = SmartMode,
             apiKeysProtected = Convert.ToBase64String(cipher),
         };
@@ -532,6 +542,7 @@ public sealed class SettingsStore
         ActivePrompt = GetString(root, "activePrompt", ActivePrompt);
         SeenHint = GetBool(root, "seenHint", SeenHint);
         SeenPillHint = GetBool(root, "seenPillHint", SeenPillHint);
+        OverlayPosition = GetString(root, "overlayPosition", OverlayPosition);
         SmartMode = GetBool(root, "smartMode", SmartMode);
 
         // Keys decrypt in isolation: a bad blob must not discard the fields
@@ -727,6 +738,12 @@ public sealed class SettingsStore
         if (seenPillHint.HasValue)
         {
             SeenPillHint = seenPillHint.Value;
+        }
+
+        var overlayPosition = SalvageString(raw, "overlayPosition");
+        if (overlayPosition is not null)
+        {
+            OverlayPosition = overlayPosition;
         }
 
         var smart = SalvageBool(raw, "smartMode");

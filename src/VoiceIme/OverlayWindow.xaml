@@ -57,7 +57,9 @@
             Margin="10"
             Background="{DynamicResource SurfaceOverlay}"
             BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
-            Padding="12,0">
+            Padding="12,0"
+            MouseLeftButtonDown="OnPillMouseDown"
+            Cursor="SizeAll">
         <Border.Effect>
             <!-- Elevation: the pill floats over arbitrary app content, so it
                  needs a shadow (BorderSubtle alone can vanish on light

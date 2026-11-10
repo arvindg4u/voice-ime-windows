@@ -795,6 +795,7 @@ public sealed class SettingsStoreTests
                 PasteMethod = PasteMethods.ShiftInsert,
                 HistoryLimit = 250,
                 SeenPillHint = true,
+                OverlayPosition = "120,340",
             };
             store.Save();
 
@@ -808,6 +809,7 @@ public sealed class SettingsStoreTests
             Assert.Equal(PasteMethods.ShiftInsert, reloaded.PasteMethod);
             Assert.Equal(250, reloaded.HistoryLimit);
             Assert.True(reloaded.SeenPillHint);
+            Assert.Equal("120,340", reloaded.OverlayPosition);
         }
         finally
         {

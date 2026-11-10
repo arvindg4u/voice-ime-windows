@@ -181,11 +181,20 @@ public partial class OverlayWindow : Window
     /// <summary>Invoked (UI thread) when the finish (stop + paste) button is pressed.</summary>
     public event Action? FinishRequested;
 
+    /// <summary>Invoked (UI thread) after the user drags the pill to a new spot.</summary>
+    public event Action<double, double>? PositionChanged;
+
     /// <summary>
     /// Test seam: replaces the real <see cref="SystemParameters.WorkArea"/>
     /// (headless tests have no window station).
     /// </summary>
     internal Func<Rect>? WorkAreaProvider { get; set; }
+
+    /// <summary>
+    /// Persisted "left,top" the pill restores to, or null/blank for the default
+    /// bottom-center placement. Set by App from the settings store.
+    /// </summary>
+    internal string? SavedPosition { get; set; }
 
     public OverlayWindow()
     {
@@ -595,14 +604,143 @@ public partial class OverlayWindow : Window
 
     private void PositionBottomCenter()
     {
-        var area = WorkAreaProvider is not null
-            ? WorkAreaProvider()
-            : PreferredWorkArea();
-        var (left, top) = ComputePosition(area, _visibleWidth, PillHeight);
+        if (WorkAreaProvider is not null)
+        {
+            // Tests force deterministic bottom-center placement.
+            var testArea = WorkAreaProvider();
+            var (testLeft, testTop) = ComputePosition(testArea, _visibleWidth, PillHeight);
+            Left = testLeft - ShadowMargin;
+            Top = testTop - ShadowMargin;
+            return;
+        }
+
+        if (TryParsePosition(SavedPosition, out var savedLeft, out var savedTop))
+        {
+            Left = savedLeft;
+            Top = savedTop;
+            ClampToVirtualScreen();
+            return;
+        }
+
+        var (left, top) = ComputePosition(PreferredWorkArea(), _visibleWidth, PillHeight);
         // ComputePosition places the visible pill; shift so the transparent
         // shadow margin sits outside it.
         Left = left - ShadowMargin;
         Top = top - ShadowMargin;
+    }
+
+    /// <summary>
+    /// Formats a pill position for persistence ("left,top", invariant culture).
+    /// Pure.
+    /// </summary>
+    internal static string FormatPosition(double left, double top) =>
+        left.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        + ","
+        + top.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Parses a persisted "left,top" position. Pure; false on any bad input.</summary>
+    internal static bool TryParsePosition(string? value, out double left, out double top)
+    {
+        left = 0;
+        top = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var parts = value.Split(',');
+        return parts.Length == 2
+            && double.TryParse(
+                parts[0], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out left)
+            && double.TryParse(
+                parts[1], System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out top);
+    }
+
+    /// <summary>Keeps a restored position on a currently-attached monitor.</summary>
+    private void ClampToVirtualScreen()
+    {
+        try
+        {
+            var minLeft = SystemParameters.VirtualScreenLeft;
+            var minTop = SystemParameters.VirtualScreenTop;
+            var maxLeft = minLeft + SystemParameters.VirtualScreenWidth - Width;
+            var maxTop = minTop + SystemParameters.VirtualScreenHeight - Height;
+            Left = Math.Clamp(Left, minLeft, Math.Max(minLeft, maxLeft));
+            Top = Math.Clamp(Top, minTop, Math.Max(minTop, maxTop));
+        }
+        catch
+        {
+            // Metrics unavailable — leave the position as-is.
+        }
+    }
+
+    /// <summary>
+    /// Drags the pill when the user presses a non-button part of it, then
+    /// snaps/clamps it and reports the new position for persistence.
+    /// </summary>
+    private void OnPillMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left)
+        {
+            return;
+        }
+
+        // Clicks on the finish/cancel buttons must not start a drag.
+        for (var current = e.OriginalSource as DependencyObject;
+             current is not null;
+             current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is System.Windows.Controls.Button)
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            DragMove();
+        }
+        catch
+        {
+            // DragMove throws when the button was released before it started.
+            return;
+        }
+
+        SnapAndClampAfterDrag();
+        SavedPosition = FormatPosition(Left, Top);
+        PositionChanged?.Invoke(Left, Top);
+    }
+
+    /// <summary>
+    /// Snaps the pill flush to the left/right work-area edge when it is
+    /// released near one, then clamps it so it stays fully on-screen.
+    /// </summary>
+    private void SnapAndClampAfterDrag()
+    {
+        const double snap = 24;
+        Rect area;
+        try
+        {
+            area = WorkAreaProvider is not null ? WorkAreaProvider() : PreferredWorkArea();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (Math.Abs(Left - (area.Left - ShadowMargin)) <= snap)
+        {
+            Left = area.Left - ShadowMargin;
+        }
+        else if (Math.Abs((Left + Width) - (area.Right + ShadowMargin)) <= snap)
+        {
+            Left = area.Right + ShadowMargin - Width;
+        }
+
+        Left = Math.Clamp(Left, area.Left - ShadowMargin, area.Right + ShadowMargin - Width);
+        Top = Math.Clamp(Top, area.Top - ShadowMargin, area.Bottom + ShadowMargin - Height);
     }
 
     private void Render()
