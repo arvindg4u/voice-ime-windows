@@ -65,6 +65,42 @@ public partial class OverlayWindow : Window
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
+    // Foreground-monitor placement.
+    private const uint MonitorDefaultToNearest = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForSystem();
+
     /// <summary>
     /// Most characters of transcript the preview keeps.
     ///
@@ -491,11 +527,77 @@ public partial class OverlayWindow : Window
         (workArea.Left + (workArea.Width - windowWidth) / 2,
          workArea.Bottom - windowHeight - BottomOffset);
 
+    /// <summary>
+    /// Converts a physical-pixel work area to DIPs at the given scale. Pure and
+    /// unit-tested; a non-positive scale is treated as 1:1.
+    /// </summary>
+    internal static Rect PhysicalWorkAreaToDips(
+        int left, int top, int right, int bottom, double scale)
+    {
+        if (scale <= 0)
+        {
+            scale = 1;
+        }
+
+        return new Rect(
+            left / scale,
+            top / scale,
+            (right - left) / scale,
+            (bottom - top) / scale);
+    }
+
+    /// <summary>
+    /// Work area of the monitor holding the foreground window, in DIPs, so the
+    /// pill appears where the user is working instead of always on the primary
+    /// display. Falls back to <see cref="SystemParameters.WorkArea"/> when the
+    /// monitor cannot be determined or its DPI differs from the primary's
+    /// (mixed-DPI WPF virtual-screen coordinate math is not worth a mis-placed
+    /// pill). Never throws.
+    /// </summary>
+    private static Rect PreferredWorkArea()
+    {
+        try
+        {
+            var foreground = GetForegroundWindow();
+            if (foreground == IntPtr.Zero)
+            {
+                return SystemParameters.WorkArea;
+            }
+
+            var monitor = MonitorFromWindow(foreground, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero)
+            {
+                return SystemParameters.WorkArea;
+            }
+
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(monitor, ref info))
+            {
+                return SystemParameters.WorkArea;
+            }
+
+            var dpi = GetDpiForWindow(foreground);
+            var systemDpi = GetDpiForSystem();
+            if (dpi == 0 || systemDpi == 0 || dpi != systemDpi)
+            {
+                return SystemParameters.WorkArea;
+            }
+
+            var work = info.Work;
+            return PhysicalWorkAreaToDips(
+                work.Left, work.Top, work.Right, work.Bottom, dpi / 96.0);
+        }
+        catch
+        {
+            return SystemParameters.WorkArea;
+        }
+    }
+
     private void PositionBottomCenter()
     {
         var area = WorkAreaProvider is not null
             ? WorkAreaProvider()
-            : SystemParameters.WorkArea;
+            : PreferredWorkArea();
         var (left, top) = ComputePosition(area, _visibleWidth, PillHeight);
         // ComputePosition places the visible pill; shift so the transparent
         // shadow margin sits outside it.

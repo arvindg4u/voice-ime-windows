@@ -128,6 +128,25 @@ public sealed class OverlayStateTests
     }
 
     [Fact]
+    public void PhysicalWorkAreaToDips_ScalesFromPhysicalPixels()
+    {
+        var rect = OverlayWindow.PhysicalWorkAreaToDips(0, 0, 1920, 1080, 1.5);
+
+        Assert.Equal(1280, rect.Width);
+        Assert.Equal(720, rect.Height);
+    }
+
+    [Fact]
+    public void PhysicalWorkAreaToDips_NonPositiveScale_IsOneToOne()
+    {
+        var rect = OverlayWindow.PhysicalWorkAreaToDips(100, 50, 500, 450, 0);
+
+        Assert.Equal(100, rect.Left);
+        Assert.Equal(50, rect.Top);
+        Assert.Equal(400, rect.Width);
+    }
+
+    [Fact]
     public void Show_SetsSnapshotPhase_AndSetLevelUpdatesSnapshot()
     {
         if (!TryRunOnSta(window =>
