@@ -166,32 +166,42 @@ public sealed class OverlayStateTests
     /// <summary>
     /// Runs the body on an STA thread with a fresh OverlayWindow. Returns
     /// false when no window station is available (headless); rethrows body
-    /// failures. Mirrors MainWindowTests.TryRunOnSta.
+    /// failures. Mirrors MainWindowTests.TryRunOnSta. Animations are disabled
+    /// for the duration so Hide() is synchronous (the fade-out is time-based).
     /// </summary>
     private static bool TryRunOnSta(Action<OverlayWindow> body)
     {
-        OverlayWindow? window = null;
-        return StaTestHelper.TryRunOnSta(() =>
+        var previous = OverlayWindow.AnimationsEnabledProvider;
+        OverlayWindow.AnimationsEnabledProvider = static () => false;
+        try
         {
-            try
-            {
-                window = new OverlayWindow
-                {
-                    WorkAreaProvider = () => new Rect(0, 0, 1920, 1040),
-                };
-                body(window);
-            }
-            finally
+            OverlayWindow? window = null;
+            return StaTestHelper.TryRunOnSta(() =>
             {
                 try
                 {
-                    window?.Close();
+                    window = new OverlayWindow
+                    {
+                        WorkAreaProvider = () => new Rect(0, 0, 1920, 1040),
+                    };
+                    body(window);
                 }
-                catch
+                finally
                 {
-                    // Close failures surface via the body exception path.
+                    try
+                    {
+                        window?.Close();
+                    }
+                    catch
+                    {
+                        // Close failures surface via the body exception path.
+                    }
                 }
-            }
-        });
+            });
+        }
+        finally
+        {
+            OverlayWindow.AnimationsEnabledProvider = previous;
+        }
     }
 }

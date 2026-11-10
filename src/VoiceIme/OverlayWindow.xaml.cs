@@ -12,7 +12,8 @@ using System.Windows.Threading;
 namespace VoiceIme;
 
 /// <summary>
-/// Handy compact-pill port: topmost transparent 256x50 overlay showing a
+/// Handy compact-pill port: a topmost transparent pill (256x50 visible, plus a
+/// transparent shadow margin around it) showing a
 /// recording dot + waveform + timer, an uploading spinner ("Sending…"), or
 /// an error message (auto-hides after <see cref="ErrorAutoHideSeconds"/>).
 /// Bottom-center on the foreground window's monitor, 40 px above the taskbar.
@@ -27,9 +28,11 @@ namespace VoiceIme;
 public partial class OverlayWindow : Window
 {
     public const double RestingWidth = 256;
-    public const double WorkingWidth = 216;
     public const double PillHeight = 50;
     public const double BottomOffset = 40;
+
+    /// <summary>Transparent margin kept around the pill for its drop shadow.</summary>
+    public const double ShadowMargin = 10;
     public const int WaveBarCount = 9;
     public const double WaveBarWidth = 4;
     public const double WaveBarGap = 3;
@@ -92,6 +95,7 @@ public partial class OverlayWindow : Window
     private DateTime _phaseStartUtc = DateTime.UtcNow;
     private int _uploadTicks;
     private double _lastExtentWidth;
+    private double _visibleWidth = RestingWidth;
     private readonly System.Windows.Shapes.Rectangle[] _bars = new System.Windows.Shapes.Rectangle[WaveBarCount];
 
     // Coalesces bursty interim updates into one render per dispatcher frame.
@@ -317,6 +321,7 @@ public partial class OverlayWindow : Window
         }
 
         Volatile.Write(ref _visibleFlag, 1);
+        StartEntrance();
     }
 
     /// <summary>Hides the overlay. Thread-safe.</summary>
@@ -332,10 +337,69 @@ public partial class OverlayWindow : Window
         _errorTimer.Stop();
         _noticeTimer.Stop();
         Volatile.Write(ref _visibleFlag, 0);
-        if (IsVisible)
+        if (!IsVisible)
         {
-            base.Hide();
+            return;
         }
+
+        if (!AnimationsEnabled)
+        {
+            BeginAnimation(OpacityProperty, null);
+            Opacity = 1;
+            base.Hide();
+            return;
+        }
+
+        StartExit();
+    }
+
+    /// <summary>Fades the pill in on show (no-op under reduced motion).</summary>
+    private void StartEntrance()
+    {
+        BeginAnimation(OpacityProperty, null);
+        if (!AnimationsEnabled)
+        {
+            Opacity = 1;
+            return;
+        }
+
+        Opacity = 0;
+        var fade = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>
+    /// Fades the pill out, then hides. The completion checks the visibility
+    /// flag so a show that raced in during the fade is not hidden afterwards.
+    /// </summary>
+    private void StartExit()
+    {
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(110));
+        fade.Completed += (_, _) =>
+        {
+            if (Volatile.Read(ref _visibleFlag) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                BeginAnimation(OpacityProperty, null);
+                Opacity = 1;
+                if (IsVisible)
+                {
+                    base.Hide();
+                }
+            }
+            catch
+            {
+                // Closed mid-fade — nothing to hide.
+            }
+        };
+        BeginAnimation(OpacityProperty, fade);
     }
 
     /// <summary>
@@ -432,9 +496,11 @@ public partial class OverlayWindow : Window
         var area = WorkAreaProvider is not null
             ? WorkAreaProvider()
             : SystemParameters.WorkArea;
-        var (left, top) = ComputePosition(area, Width, Height);
-        Left = left;
-        Top = top;
+        var (left, top) = ComputePosition(area, _visibleWidth, PillHeight);
+        // ComputePosition places the visible pill; shift so the transparent
+        // shadow margin sits outside it.
+        Left = left - ShadowMargin;
+        Top = top - ShadowMargin;
     }
 
     private void Render()
@@ -443,7 +509,11 @@ public partial class OverlayWindow : Window
         var uploading = _state.Phase == OverlayPhase.Uploading;
         var error = _state.Phase == OverlayPhase.Error;
 
-        Width = uploading ? WorkingWidth : RestingWidth;
+        // Constant visible width across phases: a pill that narrows when it
+        // starts uploading reads as a glitch. The window adds the shadow margin
+        // on all four sides.
+        _visibleWidth = RestingWidth;
+        Width = _visibleWidth + (2 * ShadowMargin);
 
         StatusDot.Visibility = recording || error ? Visibility.Visible : Visibility.Collapsed;
         if (recording || error)

@@ -47,6 +47,11 @@
     <SolidColorBrush x:Key="SurfaceSelected" Color="#FCE7F1" />
     <SolidColorBrush x:Key="SurfaceOverlay" Color="#FFFFFF" />
 
+    <!-- Floating-pill drop shadow. Achromatic and theme-independent (dark mode
+         simply renders it invisible); kept here so the XAML audit allows the
+         literal and views never hardcode a colour. -->
+    <Color x:Key="OverlayShadowColor">#000000</Color>
+
     <!-- Text -->
     <SolidColorBrush x:Key="TextPrimary" Color="#1A1A1A" />
     <SolidColorBrush x:Key="TextSecondary" Color="#5A5A5A" />
