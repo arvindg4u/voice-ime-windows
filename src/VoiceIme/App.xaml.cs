@@ -1333,7 +1333,15 @@ public partial class App : System.Windows.Application
 
         _overlay = new OverlayWindow();
         _overlay.CancelRequested += CancelRecording;
+        _overlay.Configure(_settings.CancelHotkey, _settings.Hotkey);
     }
+
+    /// <summary>
+    /// Re-pushes the configurable keys to the pill so its screen-reader
+    /// announcement names the real ones (the cancel key is user-editable).
+    /// </summary>
+    private void RefreshOverlayConfig() =>
+        _overlay?.Configure(_settings.CancelHotkey, _settings.Hotkey);
 
     /// <summary>
     /// Task 8 overlay gating (Handy show_overlay parity, "none" mode): the
@@ -1620,6 +1628,7 @@ public partial class App : System.Windows.Application
         // The Advanced screen owns the history cap; apply it live so a lowered
         // limit evicts immediately rather than only on the next dictation.
         _clips.SetLimit(_settings.HistoryLimit);
+        RefreshOverlayConfig();
     }
 
     /// <summary>
@@ -1847,7 +1856,11 @@ public partial class App : System.Windows.Application
     /// <see cref="Views.GeneralSettingsView.Saved"/> adapter: the event
     /// carries the saved store, the tooltip re-reads the live one.
     /// </summary>
-    private void RefreshTrayTextFromSave(SettingsStore _) => RefreshTrayText();
+    private void RefreshTrayTextFromSave(SettingsStore _)
+    {
+        RefreshTrayText();
+        RefreshOverlayConfig();
+    }
 
     private void SetTray(string text)
     {

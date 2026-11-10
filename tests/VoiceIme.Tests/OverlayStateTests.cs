@@ -84,6 +84,25 @@ public sealed class OverlayStateTests
     }
 
     [Fact]
+    public void ApplyNonActivatingStyles_AddsNoActivateAndToolWindow()
+    {
+        var styled = OverlayWindow.ApplyNonActivatingStyles(0);
+
+        Assert.Equal(OverlayWindow.WsExNoActivate, styled & OverlayWindow.WsExNoActivate);
+        Assert.Equal(OverlayWindow.WsExToolWindow, styled & OverlayWindow.WsExToolWindow);
+    }
+
+    [Fact]
+    public void ApplyNonActivatingStyles_PreservesExistingBits()
+    {
+        const int existing = 0x00000010; // e.g. WS_EX_ACCEPTFILES
+
+        var styled = OverlayWindow.ApplyNonActivatingStyles(existing);
+
+        Assert.Equal(existing, styled & existing);
+    }
+
+    [Fact]
     public void Show_SetsSnapshotPhase_AndSetLevelUpdatesSnapshot()
     {
         if (!TryRunOnSta(window =>

@@ -1,6 +1,9 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
+using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
@@ -11,8 +14,12 @@ namespace VoiceIme;
 /// <summary>
 /// Handy compact-pill port: topmost transparent 256x50 overlay showing a
 /// recording dot + waveform + timer, an uploading spinner ("Sending…"), or
-/// an error message (auto-hides after 3 s). Bottom-center above the taskbar
-/// (Win32 work-area based), 40 px bottom offset.
+/// an error message (auto-hides after <see cref="ErrorAutoHideSeconds"/>).
+/// Bottom-center on the foreground window's monitor, 40 px above the taskbar.
+///
+/// The window is non-activating (<c>WS_EX_NOACTIVATE</c>) and stays out of
+/// Alt+Tab (<c>WS_EX_TOOLWINDOW</c>) so it never steals focus from the app
+/// being dictated into.
 ///
 /// Contract for Tasks 7/8 — do not rename: <see cref="Show"/>,
 /// <see cref="Hide"/>, <see cref="SetLevel"/>.
@@ -26,7 +33,34 @@ public partial class OverlayWindow : Window
     public const int WaveBarCount = 9;
     public const double WaveBarWidth = 4;
     public const double WaveBarGap = 3;
-    public const double ErrorAutoHideSeconds = 3;
+
+    /// <summary>
+    /// How long an error stays on screen before auto-hiding. Long enough to
+    /// read the recovery line for a paste failure; the tray balloon and History
+    /// still carry it after it goes.
+    /// </summary>
+    public const double ErrorAutoHideSeconds = 8;
+
+    // Win32 extended styles that keep this HUD from ever taking focus or
+    // appearing in Alt+Tab. ShowActivated=False only covers the initial show;
+    // WS_EX_NOACTIVATE covers a click on the buttons (an upstream Handy bug
+    // was exactly "overlay steals focus and typing fails").
+    private const int GwlExStyle = -20;
+    internal const int WsExNoActivate = 0x08000000;
+    internal const int WsExToolWindow = 0x00000080;
+
+    /// <summary>
+    /// Pure: OR the non-activating/no-Alt+Tab extended styles onto an existing
+    /// GWL_EXSTYLE value. Unit-tested without a window station.
+    /// </summary>
+    internal static int ApplyNonActivatingStyles(int currentExStyle) =>
+        currentExStyle | WsExNoActivate | WsExToolWindow;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
     /// <summary>
     /// Most characters of transcript the preview keeps.
@@ -54,6 +88,47 @@ public partial class OverlayWindow : Window
     private int _uploadTicks;
     private double _lastExtentWidth;
     private readonly System.Windows.Shapes.Rectangle[] _bars = new System.Windows.Shapes.Rectangle[WaveBarCount];
+
+    // Coalesces bursty interim updates into one render per dispatcher frame.
+    private bool _previewRenderQueued;
+
+    // Announcement/hint wording: the keys are configurable, so never hardcode.
+    private string _cancelHotkey = SettingsStore.DefaultCancelHotkey;
+    private string _dictationHotkey = HotkeyChord.DefaultChord;
+
+    /// <summary>
+    /// Reduced-motion seam: true when Windows animations are enabled. Swappable
+    /// so tests can drive both branches without touching the OS.
+    /// </summary>
+    internal static Func<bool> AnimationsEnabledProvider = DetectAnimationsEnabled;
+
+    private static bool DetectAnimationsEnabled()
+    {
+        try
+        {
+            return SystemParameters.ClientAreaAnimation;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    /// <summary>True when pulse/spin/slide animations may run.</summary>
+    private static bool AnimationsEnabled
+    {
+        get
+        {
+            try
+            {
+                return AnimationsEnabledProvider();
+            }
+            catch
+            {
+                return true;
+            }
+        }
+    }
 
     /// <summary>Invoked (UI thread) when the cancel button is pressed.</summary>
     public event Action? CancelRequested;
@@ -88,6 +163,48 @@ public partial class OverlayWindow : Window
 
         _errorTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(ErrorAutoHideSeconds) };
         _errorTimer.Tick += (_, _) => Hide();
+
+        // WS_EX_NOACTIVATE/TOOLWINDOW: ShowActivated=False is not enough once
+        // the user can click the buttons.
+        SourceInitialized += (_, _) => ApplyNonActivatingWindowStyles();
+    }
+
+    private void ApplyNonActivatingWindowStyles()
+    {
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            SetWindowLong(hwnd, GwlExStyle, ApplyNonActivatingStyles(GetWindowLong(hwnd, GwlExStyle)));
+        }
+        catch
+        {
+            // Best effort — a failure only means the default activation policy.
+        }
+    }
+
+    /// <summary>
+    /// Sets the keys used in the screen-reader announcement and (future) hints.
+    /// Blank values fall back to the app defaults. Thread-safe.
+    /// </summary>
+    public void Configure(string? cancelHotkey, string? dictationHotkey)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => Configure(cancelHotkey, dictationHotkey));
+            return;
+        }
+
+        _cancelHotkey = string.IsNullOrWhiteSpace(cancelHotkey)
+            ? SettingsStore.DefaultCancelHotkey
+            : cancelHotkey.Trim();
+        _dictationHotkey = string.IsNullOrWhiteSpace(dictationHotkey)
+            ? HotkeyChord.DefaultChord
+            : dictationHotkey.Trim();
     }
 
     /// <summary>Shows the overlay in the given phase and positions it. Thread-safe.</summary>
@@ -95,29 +212,45 @@ public partial class OverlayWindow : Window
 
     /// <summary>
     /// Task 8 mode-aware show (Handy show_overlay parity): "minimal" raises
-    /// the pill without the waveform bars, "full" is unchanged. "none" never
-    /// reaches here — App gates on <see cref="OverlayModes.ShouldShowPill"/>
-    /// before calling — and coerces to full defensively if it does.
-    /// Thread-safe.
+    /// the pill with a compact level cue, "full" shows the whole waveform.
+    /// "none" never reaches here — App gates on
+    /// <see cref="OverlayModes.ShouldShowPill"/> before calling — and coerces
+    /// to full defensively if it does. Thread-safe.
     /// </summary>
-    public void Show(OverlayPhase phase, string? mode)
+    public void Show(OverlayPhase phase, string? mode) => ShowCore(phase, mode, message: null);
+
+    /// <summary>
+    /// Shows the overlay in the <see cref="OverlayPhase.Error"/> phase with a
+    /// message; auto-hides after <see cref="ErrorAutoHideSeconds"/>. Thread-safe.
+    /// </summary>
+    public void ShowError(string message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ShowCore(OverlayPhase.Error, OverlayModes.Full, message);
+    }
+
+    /// <summary>
+    /// Single render/announce entry point for every phase. Previously
+    /// <see cref="ShowError"/> rendered twice, so the screen reader heard a
+    /// throwaway "Something went wrong" before the real message. Thread-safe.
+    /// </summary>
+    private void ShowCore(OverlayPhase phase, string? mode, string? message)
     {
         if (!Dispatcher.CheckAccess())
         {
-            Dispatcher.BeginInvoke(() => Show(phase, mode));
+            Dispatcher.BeginInvoke(() => ShowCore(phase, mode, message));
             return;
         }
 
         _mode = OverlayModes.Coerce(mode);
-
-        _state = OverlayState.Initial.WithPhase(
-            phase, phase == OverlayPhase.Error ? "Something went wrong" : null);
+        _state = OverlayState.Initial.WithPhase(phase, message);
         _level = 0f;
         _previewFinals = string.Empty;
         _previewInterim = string.Empty;
         _lastExtentWidth = 0;
         _phaseStartUtc = DateTime.UtcNow;
         _uploadTicks = 0;
+        _previewRenderQueued = false;
         Render();
         PositionBottomCenter();
         _timer.Start();
@@ -136,24 +269,6 @@ public partial class OverlayWindow : Window
         }
 
         Volatile.Write(ref _visibleFlag, 1);
-    }
-
-    /// <summary>
-    /// Shows the overlay in the <see cref="OverlayPhase.Error"/> phase with a
-    /// message; auto-hides after <see cref="ErrorAutoHideSeconds"/>. Thread-safe.
-    /// </summary>
-    public void ShowError(string message)
-    {
-        ArgumentNullException.ThrowIfNull(message);
-        if (!Dispatcher.CheckAccess())
-        {
-            Dispatcher.BeginInvoke(() => ShowError(message));
-            return;
-        }
-
-        Show(OverlayPhase.Error);
-        _state = _state.WithPhase(OverlayPhase.Error, message);
-        Render();
     }
 
     /// <summary>Hides the overlay. Thread-safe.</summary>
@@ -209,6 +324,12 @@ public partial class OverlayWindow : Window
     {
         ArgumentNullException.ThrowIfNull(finals);
         ArgumentNullException.ThrowIfNull(interim);
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => SetPreview(finals, interim));
+            return;
+        }
+
         if (Volatile.Read(ref _visibleFlag) == 0)
         {
             return;
@@ -216,13 +337,22 @@ public partial class OverlayWindow : Window
 
         _previewFinals = finals;
         _previewInterim = interim;
-        if (!Dispatcher.CheckAccess())
+
+        // Coalesce bursty interim tokens into one render per dispatcher frame:
+        // the render forces UpdateLayout, which is the expensive part.
+        if (_previewRenderQueued)
         {
-            Dispatcher.BeginInvoke(RenderPreview);
             return;
         }
 
-        RenderPreview();
+        _previewRenderQueued = true;
+        Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                _previewRenderQueued = false;
+                RenderPreview();
+            }),
+            DispatcherPriority.Render);
     }
 
     /// <summary>
@@ -271,8 +401,17 @@ public partial class OverlayWindow : Window
         {
             StatusDot.SetResourceReference(
                 Shape.FillProperty, recording ? "AccentFill" : "ErrorText");
-            StatusDot.BeginStoryboard(
-                (System.Windows.Media.Animation.Storyboard)FindResource("DotPulse"));
+            if (AnimationsEnabled)
+            {
+                StatusDot.BeginStoryboard(
+                    (System.Windows.Media.Animation.Storyboard)FindResource("DotPulse"));
+            }
+            else
+            {
+                // Reduced motion: hold the dot at full opacity, no pulse.
+                StatusDot.BeginAnimation(UIElement.OpacityProperty, null);
+                StatusDot.Opacity = 1;
+            }
         }
         else
         {
@@ -281,7 +420,7 @@ public partial class OverlayWindow : Window
         }
 
         Spinner.Visibility = uploading ? Visibility.Visible : Visibility.Collapsed;
-        if (uploading)
+        if (uploading && AnimationsEnabled)
         {
             Spinner.BeginStoryboard(
                 (System.Windows.Media.Animation.Storyboard)FindResource("SpinnerSpin"));
@@ -291,9 +430,8 @@ public partial class OverlayWindow : Window
             SpinnerRotate.BeginAnimation(RotateTransform.AngleProperty, null);
         }
 
-        // Task 8 "minimal" mode: the pill raises, but the waveform bars stay
-        // hidden — recording still shows dot + timer, uploading is untouched.
-        // The interim preview (if any) takes the center slot instead.
+        // Center slot precedence while Recording: live preview, else the level
+        // cue. "minimal" keeps a compact cue; "full" shows the whole waveform.
         RenderPreview();
         SendingLabel.Visibility = uploading ? Visibility.Visible : Visibility.Collapsed;
         // The timer shows the capture duration while recording and keeps
@@ -329,7 +467,8 @@ public partial class OverlayWindow : Window
     {
         var message = _state.Phase switch
         {
-            OverlayPhase.Recording => "Recording. Press Escape to cancel.",
+            OverlayPhase.Recording =>
+                $"Recording. Press {_cancelHotkey} to cancel, {_dictationHotkey} to finish.",
             OverlayPhase.Uploading => "Transcribing.",
             OverlayPhase.Error => _state.Message ?? "Dictation failed.",
             _ => null,
@@ -383,10 +522,17 @@ public partial class OverlayWindow : Window
             SlideInNewText();
         }
 
-        var showWaveform = _state.Phase == OverlayPhase.Recording
-            && !showPreview
-            && string.Equals(_mode, OverlayModes.Full, StringComparison.Ordinal);
+        var showWaveform = _state.Phase == OverlayPhase.Recording && !showPreview;
         WavePanel.Visibility = showWaveform ? Visibility.Visible : Visibility.Collapsed;
+
+        // "minimal" keeps a compact 3-bar level cue (the recording is still
+        // visible); "full" shows all nine bars.
+        var full = string.Equals(_mode, OverlayModes.Full, StringComparison.Ordinal);
+        for (var i = 0; i < _bars.Length; i++)
+        {
+            var keep = full || i is >= 3 and <= 5;
+            _bars[i].Visibility = showWaveform && keep ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>
@@ -429,9 +575,9 @@ public partial class OverlayWindow : Window
         var growth = extent - _lastExtentWidth;
         _lastExtentWidth = extent;
 
-        // Nothing was added (or the text shrank as the hypothesis was corrected),
-        // so there is no motion to convey.
-        if (growth <= 0.5)
+        // Nothing was added (or the text shrank as the hypothesis was
+        // corrected), or the user asked for reduced motion — no slide either way.
+        if (!AnimationsEnabled || growth <= 0.5)
         {
             PreviewText.RenderTransform = null;
             return;

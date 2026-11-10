@@ -146,7 +146,9 @@
                            Foreground="{DynamicResource TextMuted}"
                            Text="0:00" />
                 <Button x:Name="CancelButton" Style="{DynamicResource OverlayCancelButton}"
-                        Content="✕" Click="OnCancelClick" />
+                        Content="✕" Click="OnCancelClick"
+                        AutomationProperties.Name="Cancel dictation"
+                        ToolTip="Cancel and discard this dictation" />
             </StackPanel>
         </Grid>
     </Border>

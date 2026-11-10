@@ -211,7 +211,9 @@ public static class ContrastContract
 
         foreach (var (text, surface, on) in statuses)
         {
-            foreach (var backdrop in new[] { Palette.SurfaceCanvas, Palette.SurfaceCard })
+            // SurfaceOverlay included: the dictation pill paints status text
+            // directly on it.
+            foreach (var backdrop in new[] { Palette.SurfaceCanvas, Palette.SurfaceCard, Palette.SurfaceOverlay })
             {
                 rules.Add(new ContrastRule(
                     $"{text}/{backdrop}", text, backdrop, Contrast.AaText,
